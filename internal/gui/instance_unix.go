@@ -22,7 +22,7 @@ var heldInstance *os.File
 // whose path has its version in it — shares one: the Mac reopening the
 // copy the user ran after a shutdown while Open at login starts the one
 // it was turned on for, or a copy run translocated from Downloads, put
-// two birds in the menu bar (inaction on Discord).
+// two icons in the menu bar (inaction on Discord).
 func instanceLock(dir, exe string) string {
 	if r, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = r

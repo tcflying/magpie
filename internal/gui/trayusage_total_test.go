@@ -45,7 +45,7 @@ func TestTrayTotals(t *testing.T) {
 		if c.ID != want.id || !slices.Equal(c.Rows, want.rows) {
 			t.Errorf("cell %d: %q %q, want %q %q", i, c.ID, c.Rows, want.id, want.rows)
 		}
-		// the bird beside it is whose it is: no vendor's logo nor letter
+		// the mark beside it is whose it is: no vendor's logo nor letter
 		if !c.Plain || c.Icon != nil || c.Letter != "" {
 			t.Errorf("cell %d: plain %v icon %d bytes letter %q", i, c.Plain, len(c.Icon), c.Letter)
 		}

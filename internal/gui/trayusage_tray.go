@@ -84,7 +84,7 @@ func (h *host) watchTrayUsage() {
 				}
 			}
 			// Reapply even unchanged cells: a system menu-bar rebuild can
-			// replace the composed image with Wails' bird icon.
+			// replace the composed image with Wails' tray icon.
 			if len(cells) > 0 {
 				bird := trayIcon
 				if s.TrayNoBird {
@@ -111,7 +111,7 @@ func (h *host) watchTrayUsage() {
 }
 
 // trayCellClick opens the allowance represented by the clicked image cell.
-// A visible panel closes on the next click, as clicking the bird does.
+// A visible panel closes on the next click, as clicking the tray's mark does.
 func (h *host) trayCellClick(id string) {
 	if id == "" {
 		return

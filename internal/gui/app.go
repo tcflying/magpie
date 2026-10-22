@@ -35,8 +35,8 @@ import (
 //go:embed tray.png
 var trayIcon []byte // black glyph, tinted by the macOS menu bar
 
-// trayFlap is the bird beating its wing and flicking its tail, played on
-// the tray icon when it is clicked (build/icon/gen.go tray-flap).
+// trayFlap is the disc's pulse, the frames the tray icon plays when it is
+// clicked (build/icon/gen.go tray-flap).
 //
 //go:embed trayflap/*.png
 var trayFlap embed.FS
@@ -71,7 +71,7 @@ type host struct {
 	panel *application.WebviewWindow
 	main  *application.WebviewWindow
 	tray  *application.SystemTray
-	// flapping is set while the tray bird plays its flap, so a second
+	// flapping is set while the tray disc plays its pulse, so a second
 	// click in it doesn't start another over it
 	flapping atomic.Bool
 
@@ -629,7 +629,7 @@ func singleInstance(h *host) *application.SingleInstanceOptions {
 }
 
 // flap plays trayFlap on the tray icon, a frame every 30ms as they were
-// drawn — the .9s of the header logo's flap — and ends on the still bird.
+// drawn — the disc's .9s breath — and ends on the still disc.
 func (h *host) flap() {
 	if !h.flapping.CompareAndSwap(false, true) {
 		return
@@ -647,8 +647,8 @@ func (h *host) flap() {
 	h.setBird(trayIcon)
 }
 
-// setBird sets a frame of the bird: in the menu bar's image while it shows
-// the usage cards (trayImageFrame), else as the tray's icon.
+// setBird sets a frame of the tray's mark: in the menu bar's image while it
+// shows the usage cards (trayImageFrame), else as the tray's icon.
 func (h *host) setBird(b []byte) {
 	if !trayImageFrame(b) {
 		h.tray.SetTemplateIcon(b)

@@ -16,7 +16,7 @@ func setTrayPassive(*application.SystemTray, bool) bool { return true }
 // trayClick: Wails places the panel by the click itself here.
 func trayClick(*application.SystemTray) (int, bool) { return 0, false }
 
-// traySchemeLight, watchTrayScheme: only Linux's tray takes the bird in a
+// traySchemeLight, watchTrayScheme: only Linux's tray takes the mark in a
 // colour of the desktop's (linuxTrayIcon).
 func traySchemeLight() bool      { return false }
 func watchTrayScheme(func(bool)) {}
