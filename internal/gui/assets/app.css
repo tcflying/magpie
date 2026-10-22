@@ -37,9 +37,9 @@
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   --code: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --logo-invert: 0;
-  /* the mark in the header: the app's green, the disc the app icon is drawn
+  /* the mark in the header: the app's yellow, the disc the app icon is drawn
      (build/icon/gen.go); the dark theme has its own shade of it */
-  --logo-fill: #14b789;
+  --logo-fill: #facc15;
   --tk-s: #1a7f45; --tk-k: #7c3aed; --tk-f: #1d4ed8; --tk-n: #b45309; --tk-v: #0e7490; --tk-o: #a21caf; --tk-c: #85858d;
   /* what a chart tells apart: providers, agents, models */
   --c1: #4f46e5; --c2: #0ea5e9; --c3: #10b981; --c4: #f59e0b; --c5: #ec4899; --c6: #8b5cf6; --c7: #64748b;
@@ -75,7 +75,7 @@
     --drift-soft: #3b1219;
     --pop-bg: rgba(38, 38, 43, .96);
     --shadow: 0 16px 44px rgba(0, 0, 0, .55), 0 2px 8px rgba(0, 0, 0, .3), 0 0 0 .5px rgba(255, 255, 255, .1);
-    --logo-invert: 1; --logo-fill: #2ad39b;
+    --logo-invert: 1; --logo-fill: #fde047;
     --tk-s: #98d8a4; --tk-k: #c4b5fd; --tk-f: #93c5fd; --tk-n: #f2b544; --tk-v: #67e8f9; --tk-o: #f0abfc; --tk-c: #8b8b94;
     --c1: #a5b4fc; --c2: #7dd3fc; --c3: #6ee7b7; --c4: #fcd34d; --c5: #f9a8d4; --c6: #c4b5fd; --c7: #94a3b8;
   }
@@ -89,7 +89,7 @@
   --drift: #ff9592; --drift-soft: #3b1219;
   --pop-bg: rgba(38, 38, 43, .96);
   --shadow: 0 16px 44px rgba(0, 0, 0, .55), 0 2px 8px rgba(0, 0, 0, .3), 0 0 0 .5px rgba(255, 255, 255, .1);
-  --logo-invert: 1; --logo-fill: #2ad39b;
+  --logo-invert: 1; --logo-fill: #fde047;
   --tk-s: #98d8a4; --tk-k: #c4b5fd; --tk-f: #93c5fd; --tk-n: #f2b544; --tk-v: #67e8f9; --tk-o: #f0abfc; --tk-c: #8b8b94;
   --c1: #a5b4fc; --c2: #7dd3fc; --c3: #6ee7b7; --c4: #fcd34d; --c5: #f9a8d4; --c6: #c4b5fd; --c7: #94a3b8;
 }
@@ -173,7 +173,7 @@ code { font: var(--code-style, normal) var(--code-weight, 400) 11.5px var(--code
 .ic.generic { color: var(--muted); }
 /* magpie's own logo: the app's disc (build/icon/magpie.svg). A mask takes its
    shape from the picture and its colour from the paint, so the mark is the
-   app's green (--logo-fill, which the dark theme has its own shade of) and
+   app's yellow (--logo-fill, which the dark theme has its own shade of) and
    not the ink of the row it stands in. */
 .ic[data-icon="magpie"] .mask { background: var(--logo-fill); }
 /* maskSpan's shelf: a hidden user of every mask picture loaded, so a logo drawn again paints at once (#1847) */
@@ -209,7 +209,7 @@ body:not(.window.linux) #winclose { display: none; }
 .icon.winclose { align-self: center; width: 22px; height: 22px; margin-left: 8px; border-radius: 50%; background: var(--pill); color: var(--fg-2); }
 .icon.winclose:hover { background: color-mix(in srgb, var(--fg) 12%, transparent); }
 /* the mark in the header is the app's disc (build/icon/magpie.svg): the app's
-   green. It swells about its middle when the window opens and the pointer
+   yellow. It swells about its middle when the window opens and the pointer
    comes over it; the menu bar's row has no room to grow, so the tray's own
    breath draws in. The two share the .9s, not the curve. */
 .logo { display: inline-flex; }
