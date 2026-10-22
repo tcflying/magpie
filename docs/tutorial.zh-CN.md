@@ -1,6 +1,6 @@
-# magpie Windows 版使用教程（品牌绿圆版）
+# magpie Windows 版使用教程（品牌黄圆版）
 
-这份教程写给拿到这个 fork 的人：你想在 Windows 上把它从源码跑起来，把桌面和任务栏的图标换成那颗品牌绿圆，并且弄明白托盘里那颗绿圆为什么曾经比旁边的图标小一圈。
+这份教程写给拿到这个 fork 的人：你想在 Windows 上把它从源码跑起来，把桌面和任务栏的图标换成那颗品牌黄圆，并且弄明白托盘里那颗黄圆为什么曾经比旁边的图标小一圈。
 
 功能层面的说明不在这里，请看 [README.zh-CN.md](../README.zh-CN.md) 的「快速开始」和 [完整参考](reference.md)（英文）。
 
@@ -8,10 +8,12 @@
 
 ## 一、这是什么
 
-这是 [yetone/magpie](https://github.com/yetone/magpie) 的一个 fork。**功能和上游完全一样**，只有一处视觉上的改动：上游在所有地方显示的是一只 magpie 鸟，这个 fork 把它换成了**品牌绿实心圆**。
+这是 [yetone/magpie](https://github.com/yetone/magpie) 的一个 fork。**功能和上游完全一样**，只有视觉上的改动：上游在所有地方显示的是一只 magpie 鸟，这个 fork 把它换成了**品牌黄实心圆**。
 
-- 亮色主题的品牌绿：`#14B789`（rgb 20, 183, 137）
-- 暗色主题的品牌绿：`#2AD39B`（rgb 42, 211, 155）
+- 亮色主题的品牌黄：`#FACC15`（rgb 250, 204, 21）
+- 暗色主题的品牌黄：`#FDE047`（rgb 253, 224, 71）
+
+这个 fork 最早做出来的是**绿圆**，后来只是把同一个圆盘换成黄色——一次普通的后续修改。绿圆那一版还留在仓库的历史里，`git log --oneline` 往下翻能看到。
 
 换过的地方：
 
@@ -22,14 +24,16 @@
 | 应用内顶栏 logo | `internal/gui/assets/index.html` 里内联的 SVG |
 | 浏览器 favicon | `internal/gui/assets/icons/favicon.svg` |
 | 登录页的 magpie 标记 | `internal/provider/magpie.svg`（供应商登录结束时浏览器落到的那个页面） |
-| Agents 列表里 magpie 自己的图标 | `internal/gui/assets/icons/magpie.svg`（当作遮罩用，`app.css` 给了它品牌绿） |
+| Agents 列表里 magpie 自己的图标 | `internal/gui/assets/icons/magpie.svg`（当作遮罩用，`app.css` 给了它品牌黄） |
 | 站点 logo | `site/public/img/magpie.svg`、`site/public/img/magpie-small.svg` |
 | Omarchy 桌面小组件的图形 | `internal/omarchy/widget/Widget.qml` |
 
-**权威的源只有两处**，要改品牌形状就改这两处：
+**形状的权威源只有一处**，要改品牌形状就改它：
 
 - `build/icon/magpie.svg` —— 圆本身。44 格的 viewBox，圆心在 (22, 22)，半径 21.6：路径从 0.40 走到 43.60。
-- `build/icon/gen.go` —— 画法（怎么把 SVG 变成 PNG 和 ICO）和两处绿色：`0x14B789` 与暗色的 `0x2AD39B`。
+- `build/icon/gen.go` —— 画法（怎么把 SVG 变成 PNG 和 ICO）和两处颜色：`0xFACC15` 与暗色的 `0xFDE047`。
+
+同一组颜色值还写在 `internal/gui/assets/app.css` 的 `--logo-fill`、`internal/gui/assets/icons/favicon.svg`、`internal/provider/magpie.svg` 和 `internal/provider/signin.go` 里。改颜色时这几处要一起改。
 
 **PNG 是生成出来的产物，不要手改 PNG。** 改了 SVG 或 `gen.go`，就重跑生成器（第五节），把生成物一起提交。
 
@@ -51,18 +55,55 @@ go run github.com/tc-hib/go-winres@v0.3.3 make --in build/windows/winres.json --
 
 ### 2) 构建
 
+在**仓库根目录**里跑（先 `cd` 到仓库根）。产物直接写到 `ops/yellow-20261023/artifacts/`，目录没有就建一个：
+
 ```powershell
-$env:CGO_ENABLED='0'; $env:GOOS='windows'; $env:GOARCH='amd64'
-$ver = (git describe --tags --always --dirty) -replace '[^A-Za-z0-9._+-]',''
-if (-not $ver) { $ver = 'dev' }
-go build -tags production -trimpath -ldflags="-s -w -X main.version=$ver -H windowsgui" -o magpie.exe .
-$env:CGO_ENABLED=$null; $env:GOOS=$null; $env:GOARCH=$null
+$out = 'ops\yellow-20261023\artifacts'
+New-Item -ItemType Directory -Force -Path $out | Out-Null
+
+$envs = 'CGO_ENABLED','GOOS','GOARCH'
+$old = @{}
+foreach ($n in $envs) { $old[$n] = [Environment]::GetEnvironmentVariable($n, 'Process') }
+try {
+  $env:CGO_ENABLED = '0'; $env:GOOS = 'windows'; $env:GOARCH = 'amd64'
+  $ver = (git describe --tags --always --dirty --long) -replace '[^A-Za-z0-9._+-]',''
+  if (-not $ver) { $ver = 'dev' }
+  $ver = "$ver+yellow"
+  go build -tags production -trimpath -ldflags="-s -w -X main.version=$ver -H windowsgui" -o "$out\magpie-yellow.exe" .
+} finally {
+  foreach ($n in $envs) {
+    if ($null -eq $old[$n]) { Remove-Item "env:$n" -ErrorAction SilentlyContinue }
+    else { Set-Item "env:$n" $old[$n] }
+  }
+}
 ```
+
+几点：
+
+- **产物是 `ops\yellow-20261023\artifacts\magpie-yellow.exe`**（官方上游那份叫 `magpie.exe`，别混了）。`ops/` 整个目录被 `.gitignore` 挡着，不会进 Git。
+- **三个环境变量只是临时改一下**，`finally` 里照原样还原：原来没有的还删掉，不动你 shell 里原本的设置。
+
+Go 自己的缓存和临时文件默认落在 C 盘（`%LOCALAPPDATA%\go-build`、`%USERPROFILE%\go\pkg\mod`）。要把开发环境整体放 D 盘，就在**构建前**先指到 D 盘（路径换成你自己的）：
+
+```powershell
+$env:GOCACHE='D:\go-cache\build'; $env:GOMODCACHE='D:\go-cache\mod'; $env:GOTMPDIR='D:\go-cache\tmp'
+New-Item -ItemType Directory -Force -Path D:\go-cache\build,D:\go-cache\mod,D:\go-cache\tmp | Out-Null
+```
+
+构建只写 `ops/` 和 Go 自己的缓存，不碰用户数据：设置、账号、Provider 都在 `%USERPROFILE%\.config\magpie`（便携版是 exe 旁边的 `data\`），构建过程不读也不改它们。
+
+**版本串是防自动更新的关键**，别改：
+
+- `--long` 让 `git describe` 一定带上「离上一个 tag 几个提交 + 提交号」，哪怕 HEAD 正好落在 tag 上，也是 `v0.1.1327-0-g6d812fc3` 这种形式。少了 `--long`，在 tag 上构建只会得到 `v0.1.1327`，程序就会当成正式发布版。
+- 程序判断「是不是正式发布版」看的就是这一段：`internal/update/update.go` 的 `Released()`。版本里带 `-<数字>-g<提交号>`（或者 `-dirty`），它就认定这不是发布版，官方更新不会来替换它。
+- `+yellow` 只是给这个构建打标记。`+` 后面是构建元信息，程序读版本时不算它（`parse()` 会先把它切掉）。
+
+所以版本串长这样：`v0.1.1327-5-g6d812fc3+yellow`；工作区有改动时是 `v0.1.1327-5-g6d812fc3-dirty+yellow`。
 
 两个容易踩的坑：
 
 - **`-H windowsgui` 必须写在 `-ldflags` 里面。** 写到外面会报 `flag provided but not defined: -H`。
-- **`git describe` 的输出要先过滤。** 版本串里可能有 Go 链接器不认的字符，所以先 `-replace '[^A-Za-z0-9._+-]',''`，再塞进 `-ldflags`。
+- **`git describe` 的输出要先过滤。** 版本串里可能有 Go 链接器不认的字符，所以先 `-replace '[^A-Za-z0-9._+-]',''`，再塞进 `-ldflags`（`+` 在白名单里，别被滤掉）。
 
 ### 3) 删掉中间产物
 
@@ -74,7 +115,7 @@ del rsrc_windows_amd64.syso
 
 ### 跑起来
 
-- 跑着的 exe 被 Windows 锁着，**换不掉**。要更新就先退出 magpie（托盘图标右键 → 退出 magpie），再替换 `magpie.exe`。
+- 跑着的 exe 被 Windows 锁着，**换不掉**。要更新就先退出 magpie（托盘图标右键 → 退出 magpie），再替换 `magpie-yellow.exe`。
 - 网关在 `127.0.0.1:3425`。
 - 想知道手上这个二进制自己的版本戳：
 
@@ -99,22 +140,22 @@ Windows 任务栏上的图标取的是**窗口自己的图标**（`WM_SETICON`�
 所以要让任务栏和桌面上的图标都好看，得同时做两件事：
 
 1. 改 app 的图标资源（第二节第 1 步已经做了）；
-2. 让桌面快捷方式指向一个 `.ico`，这样**桌面图标**和它下面的任务栏按钮才是绿圆。
+2. 让桌面快捷方式指向一个 `.ico`，这样**桌面图标**和它下面的任务栏按钮才是黄圆。
 
 ### 怎么做
 
-先把绿圆存成一个 `.ico`，比如放在 `%LOCALAPPDATA%\Magpie\magpie-green.ico`。然后用 PowerShell 建快捷方式：
+先把黄圆存成一个 `.ico`，比如放在 `%LOCALAPPDATA%\Magpie\magpie-yellow.ico`。然后用 PowerShell 建快捷方式：
 
 ```powershell
 $sh = New-Object -ComObject WScript.Shell
 $lnk = $sh.CreateShortcut("$env:USERPROFILE\Desktop\Magpie.lnk")
-$lnk.TargetPath       = 'G:\zcode-project\magpie\magpie.exe'
-$lnk.WorkingDirectory = 'G:\zcode-project\magpie'
-$lnk.IconLocation     = "$env:LOCALAPPDATA\Magpie\magpie-green.ico,0"
+$lnk.TargetPath       = 'D:\mmx-project\magpie\ops\yellow-20261023\artifacts\magpie-yellow.exe'
+$lnk.WorkingDirectory = 'D:\mmx-project\magpie\ops\yellow-20261023\artifacts'
+$lnk.IconLocation     = "$env:LOCALAPPDATA\Magpie\magpie-yellow.ico,0"
 $lnk.Save()
 ```
 
-路径换成你自己的。
+路径换成你自己的。快捷方式要指向本 fork 那个 `magpie-yellow.exe`，别指向官方的 `magpie.exe`。
 
 **托盘图标不用管。** 托盘里那颗是程序自己画的（第四节），跟快捷方式没关系。
 
@@ -124,7 +165,7 @@ $lnk.Save()
 
 ### 改之前是什么样
 
-托盘里那颗绿圆只有 **18×18 物理像素**，比同一排的应用小一圈。上游 issue [yetone/magpie#2404](https://github.com/yetone/magpie/issues/2404) 报的是同一类问题：报告者在 Windows 11 的通知区域逐像素量过，同排 7 个图标里只有 magpie 是 13×13（100% 缩放下），别的都填满了 16×16 的槽位。
+托盘里那颗黄圆只有 **18×18 物理像素**，比同一排的应用小一圈。上游 issue [yetone/magpie#2404](https://github.com/yetone/magpie/issues/2404) 报的是同一类问题：报告者在 Windows 11 的通知区域逐像素量过，同排 7 个图标里只有 magpie 是 13×13（100% 缩放下），别的都填满了 16×16 的槽位。
 
 ### 为什么不是源图画布的错
 
@@ -144,11 +185,11 @@ Wails v3 的 `pkg/w32/icon.go` 里，`CreateSmallHIconFromImage` 对 **PNG 是�
 | :-- | :-- | :-- | :-- | :-- | :-- | :-- | :-- |
 | 系统要的尺寸 | 16 | 20 | 24 | 28 | 32 | 36 | 40 |
 
-少一档，系统就会拿下一档去放大，那颗绿圆就会发虚。
+少一档，系统就会拿下一档去放大，那颗黄圆就会发虚。
 
 ### 实测结果
 
-改完托盘里那颗绿圆是 **20×20 物理像素**，和同排（ChatGPT、终端、蓝盾）一样大。本机 2560×1440、125% 缩放，系统要的尺寸是 20。
+改完托盘里那颗黄圆是 **20×20 物理像素**，和同排（ChatGPT、终端、蓝盾）一样大。本机 2560×1440、125% 缩放，系统要的尺寸是 20。
 
 ### 守卫测试
 
@@ -163,7 +204,7 @@ Wails v3 的 `pkg/w32/icon.go` 里，`CreateSmallHIconFromImage` 对 **PNG 是�
 
 ## 五、重新生成图标
 
-`make icons` 会重新生成全部图标，包括 macOS 的 icns。但它最后两步 `iconutil` 和 `xcrun actool` **只有 macOS 有**，在 Windows 上会失败。
+上游的 `make icons` 会重新生成全部图标，包括 macOS 的 icns。但它最后两步 `iconutil` 和 `xcrun actool` **只有 macOS 有**，在 Windows 上会失败。
 
 在 Windows 上单独重跑你需要的那几条：
 
@@ -202,6 +243,14 @@ foreach ($s in 16,32,48,64,128,256) { go run build/icon/gen.go app $s "build/win
 
 ## 七、常见问题 / 已知限制
 
+### 官方版会把黄圆换回鸟
+
+黄版是从这个 fork 的源码构建的，版本串是 `git describe --long` 的结果加 `+yellow`。程序据此认定它不是正式发布版（`internal/update/update.go` 的 `Released()`），官方更新不会来替换它。GUI 里没有安装官方更新的按钮，这是有意这样。
+
+更新黄版的办法就是从这个 fork 的源码重新构建，再替换掉旧 exe。
+
+官方 release 是从上游构建的，里面是那只 magpie 鸟，**不含这个定制黄圆**。所以别手动装官方版去覆盖它，覆盖了黄色就没了。
+
 ### 托盘图标比同排应用小
 
 本 fork 已经修好了（第四节）。如果你改了品牌源，或者把 `build/icon/gen.go` 里的 `trayWindowsFill` 调小，`TestTrayWindowsIconSizes` 会红。
@@ -229,18 +278,26 @@ $env:BROWSER='chromium'
 node --test --test-concurrency=1 internal/gui/tests/logo-mark.test.cjs
 ```
 
-`logo-mark.test.cjs` 读的是 `build/icon/magpie.svg` 和 `build/icon/gen.go` 里的品牌形状和两种绿色：改了源文件，它会说出哪儿不一样。
+`logo-mark.test.cjs` 读的是 `build/icon/magpie.svg` 和 `build/icon/gen.go` 里的品牌形状和两种颜色：改了源文件，它会说出哪儿不一样。
 
 ---
 
-## 八、这个 fork 相对上游的三处改动
+## 八、这个 fork 相对上游改了哪些地方
 
-改动只有这三个 commit：
+改动都是视觉和文档上的，功能跟上游一样：
 
-| commit | 说明 |
+| 改动 | 说明 |
 | :-- | :-- |
-| `a9fd5201` | `gui: the app's mark is a green disc, not a magpie` —— 顶栏 logo、favicon、应用图标 |
-| `a821f534` | `gui: the rest of magpie's marks are the app's disc too` —— 登录页标记、Agents 列表里 magpie 自己的图标、站点 logo、Omarchy 小组件图形 |
-| `56fe6195` | `gui: the tray's icon is the size of the icons beside it` —— 托盘图标改成多尺寸 ICO |
+| 标记换成纯色圆盘 | 顶栏 logo、favicon、应用图标、登录页标记、Agents 列表里 magpie 自己的图标、站点 logo、Omarchy 小组件图形 |
+| 圆盘的颜色 | 品牌黄 `#FACC15`（暗色 `#FDE047`）。这个 fork 最早做的是绿圆，改成黄圆是之后的普通后续修改，绿圆那一版还在历史里 |
+| Windows 托盘图标 | 改成多尺寸 ICO，九档尺寸，和旁边的图标一样大（第四节） |
+| 文档 | 这份教程，和 README 顶部的 fork 说明 |
 
-`git log --oneline -3` 能看到它们。
+这个 fork 的历史在 2026-10-23 重建在上游 commit `398803e3` 之上（当天上游 main 的位置）。想看它相对上游到底改了什么，在自己的 clone 里跑：
+
+```powershell
+git log --oneline 398803e3..HEAD
+git diff --stat 398803e3..HEAD
+```
+
+上游自己会往前走，所以这里不写「领先几个、落后几个」这种会过期的数字。
