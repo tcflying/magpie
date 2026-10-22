@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// Without the bird (settings.TrayNoBird, KevinXC on Discord: the icon takes
-// room in the menu bar) the cells are drawn alone: the image is the bird
+// Without the mark (settings.TrayNoBird, KevinXC on Discord: the icon takes
+// room in the menu bar) the cells are drawn alone: the image is the mark
 // and its gap narrower, and what is left is the cells as they were, from
 // the image's left edge.
 func TestTrayImageNoBird(t *testing.T) {
@@ -25,7 +25,7 @@ func TestTrayImageNoBird(t *testing.T) {
 		for _, dark := range []bool{false, true} {
 			wb, ww, h := trayImagePNG(cs, bird, 22, 2, dark, false)
 			nb, nw, nh := trayImagePNG(cs, nil, 22, 2, dark, false)
-			// the bird 22pt and its 2pt gap, at 2x
+			// the mark 22pt and its 2pt gap, at 2x
 			if d := ww - nw; d < 47 || d > 49 || nh != h {
 				t.Fatalf("dark %v: %dx%d with the bird, %dx%d without", dark, ww, h, nw, nh)
 			}

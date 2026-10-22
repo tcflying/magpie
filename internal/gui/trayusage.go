@@ -455,7 +455,7 @@ func trayUsageView(cards []provider.SubscriptionQuota, now time.Time, left, pace
 			c.Rows[i] = trayRow(r)
 		}
 		if strings.HasPrefix(q.Provider, trayTotal) {
-			// magpie's own: the bird beside it says whose, no logo of a vendor's
+			// magpie's own: the mark beside it says whose, no logo of a vendor's
 			c.Plain = true
 			cells = append(cells, c)
 			continue

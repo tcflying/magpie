@@ -37,6 +37,9 @@
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   --code: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --logo-invert: 0;
+  /* the mark in the header: the app's green, the disc the app icon is drawn
+     (build/icon/gen.go); the dark theme has its own shade of it */
+  --logo-fill: #14b789;
   --tk-s: #1a7f45; --tk-k: #7c3aed; --tk-f: #1d4ed8; --tk-n: #b45309; --tk-v: #0e7490; --tk-o: #a21caf; --tk-c: #85858d;
   /* what a chart tells apart: providers, agents, models */
   --c1: #4f46e5; --c2: #0ea5e9; --c3: #10b981; --c4: #f59e0b; --c5: #ec4899; --c6: #8b5cf6; --c7: #64748b;
@@ -72,7 +75,7 @@
     --drift-soft: #3b1219;
     --pop-bg: rgba(38, 38, 43, .96);
     --shadow: 0 16px 44px rgba(0, 0, 0, .55), 0 2px 8px rgba(0, 0, 0, .3), 0 0 0 .5px rgba(255, 255, 255, .1);
-    --logo-invert: 1;
+    --logo-invert: 1; --logo-fill: #2ad39b;
     --tk-s: #98d8a4; --tk-k: #c4b5fd; --tk-f: #93c5fd; --tk-n: #f2b544; --tk-v: #67e8f9; --tk-o: #f0abfc; --tk-c: #8b8b94;
     --c1: #a5b4fc; --c2: #7dd3fc; --c3: #6ee7b7; --c4: #fcd34d; --c5: #f9a8d4; --c6: #c4b5fd; --c7: #94a3b8;
   }
@@ -86,7 +89,7 @@
   --drift: #ff9592; --drift-soft: #3b1219;
   --pop-bg: rgba(38, 38, 43, .96);
   --shadow: 0 16px 44px rgba(0, 0, 0, .55), 0 2px 8px rgba(0, 0, 0, .3), 0 0 0 .5px rgba(255, 255, 255, .1);
-  --logo-invert: 1;
+  --logo-invert: 1; --logo-fill: #2ad39b;
   --tk-s: #98d8a4; --tk-k: #c4b5fd; --tk-f: #93c5fd; --tk-n: #f2b544; --tk-v: #67e8f9; --tk-o: #f0abfc; --tk-c: #8b8b94;
   --c1: #a5b4fc; --c2: #7dd3fc; --c3: #6ee7b7; --c4: #fcd34d; --c5: #f9a8d4; --c6: #c4b5fd; --c7: #94a3b8;
 }
@@ -200,41 +203,25 @@ body:not(.window.linux) #winclose { display: none; }
    as GNOME draws its close button, and set a little apart from the icons */
 .icon.winclose { align-self: center; width: 22px; height: 22px; margin-left: 8px; border-radius: 50%; background: var(--pill); color: var(--fg-2); }
 .icon.winclose:hover { background: color-mix(in srgb, var(--fg) 12%, transparent); }
-/* the magpie flaps, flicks its tail and bobs when the window opens and on
-   hover. It moves in pieces cut from the logo, and is drawn whole at rest, so
-   the cuts never show. */
+/* the mark in the header is the app's disc (build/icon/magpie.svg): the app's
+   green. It swells about its middle when the window opens and the pointer
+   comes over it; the menu bar's row has no room to grow, so the tray's own
+   breath draws in. The two share the .9s, not the curve. */
+.logo { display: inline-flex; }
 .logo svg { display: block; overflow: visible; }
-.logo .parts, .logo.wag .whole { display: none; }
-.logo.wag .parts { display: inline; }
-.logo .tail { transform-box: view-box; transform-origin: 14px 22px; }
-.logo .wing { transform-box: view-box; transform-origin: 30px 19.8px; }
-.logo .bird { transform-box: view-box; transform-origin: 26px 38px; }
-.logo.wag .tail { animation: tail-flick .9s cubic-bezier(.3, 0, .3, 1); }
-.logo.wag .wing { animation: wing-flap .9s cubic-bezier(.3, 0, .3, 1); }
-.logo.wag .bird { animation: bird-bob .9s cubic-bezier(.3, 0, .3, 1); }
-@keyframes wing-flap {
-  0%, 100% { transform: none; }
-  12% { transform: rotate(10deg); }
-  26% { transform: rotate(-3deg); }
-  40% { transform: rotate(8deg); }
-  56% { transform: rotate(-2deg); }
-  72% { transform: rotate(3deg); }
+.logo .mark { fill: var(--logo-fill); transform-box: view-box; transform-origin: 22px 22px; }
+.logo.wag .mark { animation: logo-pulse .9s linear; }
+/* a fifth of growth about the middle and back: the mark's own curve */
+@keyframes logo-pulse {
+  0%, 100% { transform: scale(1); }
+  12.5% { transform: scale(1.084); }
+  25% { transform: scale(1.156); }
+  37.5% { transform: scale(1.203); }
+  50% { transform: scale(1.22); }
+  62.5% { transform: scale(1.203); }
+  75% { transform: scale(1.156); }
+  87.5% { transform: scale(1.084); }
 }
-@keyframes tail-flick {
-  0%, 100% { transform: none; }
-  18% { transform: rotate(16deg); }
-  36% { transform: rotate(-7deg); }
-  54% { transform: rotate(9deg); }
-  72% { transform: rotate(-3deg); }
-  86% { transform: rotate(2deg); }
-}
-@keyframes bird-bob {
-  0%, 100% { transform: none; }
-  18% { transform: rotate(-4deg); }
-  40% { transform: rotate(2deg); }
-  62% { transform: rotate(-1deg); }
-}
-.logo { color: var(--fg); display: inline-flex; } /* ink, like the wordmark; the accent blue fought the text in light mode */
 .seg {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   display: inline-flex; padding: 2px; border-radius: 8px;

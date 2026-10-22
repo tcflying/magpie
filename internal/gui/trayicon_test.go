@@ -10,9 +10,9 @@ import (
 	"testing"
 )
 
-// The menu bar's own glyphs are about 18pt in its 22pt: a bird drawn to the
-// canvas's edges looked too big beside them (@SherlockYoYo), and its flap
-// frames were cut off at the sides.
+// The menu bar's own glyphs are about 18pt in its 22pt: the mark drawn to
+// the canvas's edges looked too big beside them (@SherlockYoYo), and the
+// pulse's frames must stay clear of the sides.
 func TestTrayIconSize(t *testing.T) {
 	files := map[string][]byte{"tray.png": trayIcon}
 	names, _ := fs.Glob(trayFlap, "trayflap/*.png")

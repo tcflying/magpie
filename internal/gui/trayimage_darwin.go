@@ -64,15 +64,15 @@ static CGFloat mpColumn(NSDictionary *c) {
 }
 
 // mpLead is the room before a cell's digits: its logo, and the gap from the
-// cell before (the bird's for the first); a cell without its logo has the
+// cell before (the mark's for the first); a cell without its logo has the
 // line between it and the one before instead.
 static CGFloat mpLead(NSDictionary *c, BOOL first) {
 	if ([c[@"plain"] boolValue]) return first ? mpPlainGap : mpSepGap + mpSep + mpSepGap;
 	return (first ? 0 : mpCellGap) + mpLogo + mpLogoGap;
 }
 
-// mpIn is the room before the first cell: the bird's and the gap after
-// it, or none when the bird is left out (settings.TrayNoBird).
+// mpIn is the room before the first cell: the mark's and the gap after
+// it, or none when the mark is left out (settings.TrayNoBird).
 static CGFloat mpIn(NSImage *bird, CGFloat h) { return bird != nil ? h + mpBirdGap : 0; }
 
 static CGFloat mpWidth(NSArray *cells, CGFloat h, CGFloat in) {
@@ -189,7 +189,7 @@ static void mpRows(NSDictionary *c, CGFloat x, CGFloat h, NSColor *ink) {
 	}
 }
 
-// mpDraw draws the bird, then each cell, top down (a flipped context).
+// mpDraw draws the mark, then each cell, top down (a flipped context).
 static void mpDraw(NSArray *cells, NSImage *bird, CGFloat h) {
 	if (bird != nil) mpTinted(bird, NSMakeRect(0, 0, h, h));
 	CGFloat x = mpIn(bird, h);
@@ -230,7 +230,7 @@ static void mpDraw(NSArray *cells, NSImage *bird, CGFloat h) {
 	}
 }
 
-// mpImage is the bird and the cells as one image, drawn afresh each time it
+// mpImage is the mark and the cells as one image, drawn afresh each time it
 // is shown so its colours follow the menu bar's, and sharp at any scale.
 static NSImage *mpImage(NSArray *cells, NSImage *bird, CGFloat h) {
 	NSImage *im = [NSImage imageWithSize:NSMakeSize(mpWidth(cells, h, mpIn(bird, h)), h) flipped:YES drawingHandler:^BOOL(NSRect r) {
@@ -263,7 +263,7 @@ static void mpStarts(NSArray *cells, CGFloat in, CGFloat *out) {
 }
 
 // mpCellAt returns the cell at x, including its trailing gap.
-// The bird and points outside the image return -1.
+// The mark and points outside the image return -1.
 static int mpCellAt(NSArray *cells, CGFloat in, CGFloat x, CGFloat w) {
 	if (cells.count == 0 || x < in || x >= w) return -1;
 	int n = (int)cells.count;
@@ -293,7 +293,7 @@ static NSStatusBarButton *mpButton(void) {
 	return nil;
 }
 
-// What the item shows while the cells are up; the bird changes as it flaps.
+// What the item shows while the cells are up; the mark changes as it pulses.
 static NSArray *mpShown;
 static NSImage *mpBird;
 
@@ -304,9 +304,9 @@ static CGFloat mpHitW = 0;
 
 // Used by the single status-item monitor and native tests. Modified clicks
 // retain the button's normal action; an unmodified quota click uses its ID.
-// Shown without the bird, the cards are the whole item, and a click on them
+// Shown without the mark, the cards are the whole item, and a click on them
 // is the item's own: it opens the panel on the tab left last, as a click on
-// the bird does (the owner: with the bird off, every click opened Allowances,
+// the mark does (the owner: with the mark off, every click opened Allowances,
 // since there was nowhere left to click that didn't).
 static BOOL mpClickCell(NSArray *cells, BOOL bird, CGFloat in, CGFloat x, CGFloat w, NSEventModifierFlags flags) {
 	if (!bird) return NO;
@@ -333,7 +333,7 @@ static NSImage *mpBirdImage(const void *bird, int len) {
 	return im;
 }
 
-// mpShow puts the cells up beside the bird; 0 when there is no item to put
+// mpShow puts the cells up beside the mark; 0 when there is no item to put
 // them on. On the main queue after what Wails has queued there (the label
 // taken off), so nothing of Wails' lands after it.
 // It runs on a Go thread, which has no autorelease pool of its own to
@@ -358,7 +358,7 @@ static int mpShow(mpTrayCell *cells, int n, const void *bird, int len) {
 	return ok;
 }
 
-// mpFrame is a frame of the bird's flap while the cells are up; 0 when
+// mpFrame is a frame of the mark's pulse while the cells are up; 0 when
 // they aren't, and the frame is Wails' to set as the icon.
 static int mpFrame(const void *bird, int len) {
 	__block int ok = 0;
@@ -367,7 +367,7 @@ static int mpFrame(const void *bird, int len) {
 		dispatch_sync(dispatch_get_main_queue(), ^{
 			if (mpShown == nil) return;
 			ok = 1;
-			if (mpBird == nil) return; // shown without the bird: no flap
+			if (mpBird == nil) return; // shown without the mark: no pulse
 			[mpBird release];
 			mpBird = [bi retain];
 			mpApply();
@@ -410,7 +410,7 @@ static char *mpTipShown(const char *tip) {
 	}
 }
 
-// mpHide forgets the cells; the icon Wails sets next puts the bird back.
+// mpHide forgets the cells; the icon Wails sets next puts the mark back.
 static void mpHide(void) {
 	dispatch_async(dispatch_get_main_queue(), ^{
 		[mpShown release];
@@ -527,11 +527,11 @@ import (
 	"unsafe"
 )
 
-// The Mac's menu bar draws the cards as one image beside the bird (see
+// The Mac's menu bar draws the cards as one image beside the mark (see
 // trayusage.go): drawn by AppKit, as the bar's own text is, in its colour
 // light or dark and sharp at any scale. Wails sizes an icon it is given to
 // a square, so the image is set on the status item's button here; the
-// bird's flap goes through it while it is up (trayImageFrame).
+// mark's pulse goes through it while it is up (trayImageFrame).
 
 // withCells hands the cells to C for the length of f.
 func withCells(cells []trayCell, f func(*C.mpTrayCell, C.int)) {
@@ -571,9 +571,9 @@ func cBytes(b []byte) (unsafe.Pointer, C.int) {
 	return C.CBytes(b), C.int(len(b))
 }
 
-// trayImageShow puts the cells up beside the bird, or alone when bird is
-// nil; false when the item can't be found, and the text is to be shown
-// instead.
+// trayImageShow puts the cells up beside the mark, or alone when it is left
+// out (settings.TrayNoBird); false when the item can't be found, and the text
+// is to be shown instead.
 func trayImageShow(cells []trayCell, bird []byte) bool {
 	ok := false
 	b, n := cBytes(bird)
@@ -582,7 +582,7 @@ func trayImageShow(cells []trayCell, bird []byte) bool {
 	return ok
 }
 
-// trayImageFrame sets a frame of the bird's flap while the cells are up;
+// trayImageFrame sets a frame of the mark's pulse while the cells are up;
 // false when they aren't, for Wails to set it as the icon.
 func trayImageFrame(bird []byte) bool {
 	b, n := cBytes(bird)
@@ -608,7 +608,7 @@ func trayTipShown(tip string) string {
 	return C.GoString(out)
 }
 
-// trayImageHide takes the cells down; the icon set next is the bird alone.
+// trayImageHide takes the cells down; the icon set next is the mark alone.
 func trayImageHide() { C.mpHide() }
 
 // trayHighlight lights the tray icon, or puts it out.

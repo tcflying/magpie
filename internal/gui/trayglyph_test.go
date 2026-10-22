@@ -11,11 +11,11 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
-// ylorn on Discord: a Linux bar's tray icon was the app's icon, a bird on
-// an opaque white tile, which a bar tinting its icons by their alpha
-// turned into a solid block. It is the bird's silhouette alone, in one
-// colour on transparency, light unless the desktop prefers light; the Mac
-// keeps its template and Windows the app's icon.
+// ylorn on Discord: a Linux bar's tray icon was the app's own icon, and a
+// bar tinting its icons by their alpha tinted the whole of it. It is the
+// mark's silhouette alone, in one colour on transparency, light unless the
+// desktop prefers light; the Mac keeps its template and Windows the app's
+// icon.
 func TestTrayIconPerOS(t *testing.T) {
 	for _, c := range []struct {
 		light bool

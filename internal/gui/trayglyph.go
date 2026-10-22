@@ -11,18 +11,18 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
-// A Linux bar's tray icon is the menu bar's bird alone, in one colour on
+// A Linux bar's tray icon is the menu bar's disc alone, in one colour on
 // transparency, as the icons beside it are (ylorn on Discord): the app's
-// own icon, a coloured bird on a white tile, stood out in a row of them, and
-// a bar that tints its icons to the theme by their alpha made the tile a
-// solid block. A bar that doesn't tint shows the colour given: light, as
-// most bars are dark, unless the desktop prefers light (traySchemeLight).
+// own coloured icon stood out in a row of them, and a bar that tints its
+// icons to the theme by their alpha tints the mark like them. A bar that
+// doesn't tint shows the colour given: light, as most bars are dark,
+// unless the desktop prefers light (traySchemeLight).
 var (
 	trayGlyphLight = color.NRGBA{0xff, 0xff, 0xff, 0xff}
 	trayGlyphDark  = color.NRGBA{0x1f, 0x1f, 0x1f, 0xff}
 )
 
-// trayGlyph is trayIcon, the bird's silhouette (a black glyph on
+// trayGlyph is trayIcon, the disc's silhouette (a black glyph on
 // transparency), in c: each pixel keeps the glyph's alpha. trayIcon itself
 // when it can't be read, which is still a silhouette.
 func trayGlyph(c color.NRGBA) []byte {
@@ -46,7 +46,7 @@ func trayGlyph(c color.NRGBA) []byte {
 }
 
 // trayIconFor is the tray's icon on goos, and whether it is a template
-// image the system tints (the Mac's menu bar): the bird alone on the Mac
+// image the system tints (the Mac's menu bar): the mark alone on the Mac
 // and Linux (linuxTrayIcon, light saying the desktop prefers a light
 // scheme), the app's coloured icon in Windows' tray, which shows apps' own.
 func trayIconFor(goos string, light bool) (icon []byte, template bool) {
