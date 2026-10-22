@@ -6,14 +6,17 @@
 // bird's eye was the only thing it dropped, and a disc has no eye); the tray
 // and the smaller tiles use it.
 //
-//	go run build/icon/gen.go tray internal/gui/tray.png     # 44px black template icon (macOS menu bar)
-//	go run build/icon/gen.go tray-flap internal/gui/trayflap # its frames when clicked (a size after the folder for a bigger look)
-//	go run build/icon/gen.go app 64 internal/gui/icon.png   # app icon at a given size
-//	make icons                                              # regenerates all of them plus magpie.icns
+//	go run build/icon/gen.go tray internal/gui/tray.png         # 44px black template icon (macOS menu bar)
+//	go run build/icon/gen.go tray-flap internal/gui/trayflap    # its frames when clicked (a size after the folder for a bigger look)
+//	go run build/icon/gen.go app 64 build/windows/icon-64.png   # app icon at a given size
+//	go run build/icon/gen.go ico internal/gui/tray-windows.ico  # the disc, full bleed, one size per DPI, for Windows' tray
+//	make icons                                                  # regenerates all of them plus magpie.icns
 package main
 
 import (
+	"bytes"
 	_ "embed"
+	"encoding/binary"
 	"fmt"
 	"image"
 	"image/color"
@@ -56,8 +59,14 @@ func main() {
 	case len(os.Args) == 4 && (os.Args[1] == "app" || os.Args[1] == "app-dark"):
 		n, _ := strconv.Atoi(os.Args[2])
 		img = app(n, os.Args[1] == "app-dark")
+	case len(os.Args) == 3 && os.Args[1] == "ico":
+		if err := ico(os.Args[2], trayWindowsSizes); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
 	default:
-		fmt.Fprintln(os.Stderr, "usage: gen.go tray <out.png> | gen.go app|app-dark <size> <out.png>")
+		fmt.Fprintln(os.Stderr, "usage: gen.go tray <out.png> | gen.go app|app-dark <size> <out.png> | gen.go ico <out.ico>")
 		os.Exit(2)
 	}
 	f, err := os.Create(os.Args[len(os.Args)-1])
@@ -185,6 +194,84 @@ func app(n int, dark bool) image.Image {
 		img.SetNRGBA(i%n, i/n, color.NRGBA{gr, gg, gb, uint8(a*255 + 0.5)})
 	}
 	return img
+}
+
+// trayWindowsFill is the disc's width as a share of the canvas it is drawn
+// on. Windows' notification area is the one place the mark is shown as big
+// as the icons beside it, and the system scales the icon it is given down
+// to that size: the app's own icon, which keeps a margin for the larger
+// icons Windows draws, came out a size smaller than its neighbours
+// (#2404). At 1 the disc fills the canvas, its edge on the canvas' edge.
+const trayWindowsFill = 1.0
+
+// trayWindowsSizes are the sizes Windows' tray icon holds, one for each
+// size the system asks for: SM_CXSMICON is 16 at 100% and grows with the
+// DPI (20 at 125%, 24 at 150%, 28 at 175%, 32 at 200%, 36 at 225% and 40 at
+// 250%), and an icon with every one of them is used as it is instead of
+// being scaled. A 225% or 250% screen has no size of its own without 36 and
+// 40: the system then takes the 32 and scales it up, which leaves the mark
+// soft next to the icons beside it.
+var trayWindowsSizes = []int{16, 20, 24, 28, 32, 36, 40, 48, 64}
+
+// trayWindows draws the disc for Windows' notification area: the app's
+// mark, full bleed, in the app's green.
+func trayWindows(n int) image.Image {
+	S := float64(n)
+	// the shape's disc is 43.20 units across in its 44-unit box (its path
+	// runs from 0.40 to 43.60), so it is scaled to the canvas' own width
+	k := S / 43.20 * trayWindowsFill
+	o := S/2 - 22*k
+	cov := coverage(parse(smallSVG), n, 8, k, o, o)
+	img := image.NewNRGBA(image.Rect(0, 0, n, n))
+	for i, a := range cov {
+		if a <= 0 {
+			continue
+		}
+		img.SetNRGBA(i%n, i/n, color.NRGBA{0x14, 0xb7, 0x89, uint8(a*255 + 0.5)})
+	}
+	return img
+}
+
+// ico writes a Windows icon file: a header, a directory entry per size and
+// the PNG of each. The sizes here are the ones the system asks for
+// (SM_CXSMICON for the tray: 16 at 100%, 20 at 125%, up to 40 at 250%). It
+// takes the nearest one that is no bigger than the size it wants, so every
+// one of them is used as it is instead of being scaled. A size it asks for
+// that is missing (36 at 225%) falls back to the nearest one, 32, which the
+// system scales up, and the mark goes soft beside the icons around it.
+func ico(path string, sizes []int) error {
+	blobs := make([][]byte, len(sizes))
+	for i, n := range sizes {
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, trayWindows(n)); err != nil {
+			return err
+		}
+		blobs[i] = buf.Bytes()
+	}
+	// the header and the directory entries, one 16-byte entry per size
+	head := make([]byte, 6+16*len(sizes))
+	binary.LittleEndian.PutUint16(head[2:], 1) // an icon, not a cursor
+	binary.LittleEndian.PutUint16(head[4:], uint16(len(sizes)))
+	offset := uint32(len(head))
+	for i, n := range sizes {
+		e := head[6+16*i:]
+		// a size of 256 is written as 0, as the byte has no room for it
+		if n < 256 {
+			e[0] = byte(n)
+			e[1] = byte(n)
+		}
+		binary.LittleEndian.PutUint16(e[4:], 1)  // colour planes
+		binary.LittleEndian.PutUint16(e[6:], 32) // bits per pixel
+		binary.LittleEndian.PutUint32(e[8:], uint32(len(blobs[i])))
+		binary.LittleEndian.PutUint32(e[12:], offset)
+		offset += uint32(len(blobs[i]))
+	}
+	out := make([]byte, 0, offset)
+	out = append(out, head...)
+	for _, b := range blobs {
+		out = append(out, b...)
+	}
+	return os.WriteFile(path, out, 0o644)
 }
 
 // coverage rasterises a shape, scaled by k and moved to (ox, oy), onto an n×n

@@ -41,8 +41,12 @@ var trayIcon []byte // black glyph, tinted by the macOS menu bar
 //go:embed trayflap/*.png
 var trayFlap embed.FS
 
-//go:embed icon.png
-var appIcon []byte // coloured, for Windows' tray
+// The Windows tray's icon: the app's mark, one size for each DPI the system
+// asks for, so the notification area takes a size of it as it is instead of
+// scaling one bigger than it (#2404).
+//
+//go:embed tray-windows.ico
+var trayWindowsIcon []byte
 
 // The app's own icon: the Mac's Dock (which it replaces the bundle's .icns
 // in, at up to 512pt), window icons and the about box. At 64px it was
