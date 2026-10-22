@@ -261,6 +261,7 @@ magpie plugin options model-map '{"mapping": {"fast": "deepseek/deepseek-chat"}}
 | | |
 | :-- | :-- |
 | **[快速上手](https://usemagpie.ai/docs/zh/start)** | 入门导览 |
+| **[Windows 使用教程（绿圆版）](docs/tutorial.zh-CN.md)** | 从源码构建、桌面快捷方式、图标重生成、常见问题 |
 | **[完整参考](docs/reference.md)**（英文） | 每个 Agent、provider 选项、网关接口、CLI 命令和文件 |
 | **[插件](https://usemagpie.ai/docs/zh/plugins)** | 使用插件和编写插件 |
 | **[意图路由](https://usemagpie.ai/docs/zh/intent)** | 按每轮对话的内容选择模型 |
