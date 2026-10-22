@@ -75,9 +75,12 @@ app: build
 icons:
 	@go run build/icon/gen.go tray internal/gui/tray.png
 	@go run build/icon/gen.go tray-flap internal/gui/trayflap
-	@go run build/icon/gen.go app 64 internal/gui/icon.png
 	@go run build/icon/gen.go app 1024 internal/gui/icon-1024.png
 	@go run build/icon/gen.go app 256 internal/gui/icon-256.png
+	@# Windows' notification area takes the icon at SM_CXSMICON, so the tray
+	@# gets an icon of its own with a size for every DPI: the system then
+	@# takes one of them as it is instead of scaling a bigger one down
+	@go run build/icon/gen.go ico internal/gui/tray-windows.ico
 	@for s in 16 32 48 64 128 256; do \
 		go run build/icon/gen.go app $$s build/windows/icon-$$s.png; \
 	done
