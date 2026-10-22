@@ -66,6 +66,12 @@ app: build
 	@sed 's/@VERSION@/$(VERSION)/' build/darwin/Info.plist > magpie.app/Contents/Info.plist
 	@echo "  magpie.app"
 
+# The bitmaps are drawn from the two hand-written SVGs: build/icon/magpie.svg
+# and magpie-small.svg are gen.go's input, not its output, and the favicon
+# (internal/gui/assets/icons/favicon.svg) is hand-written too, so this target
+# writes neither the shape nor the favicon. iconutil is macOS-only, so the
+# committed build/darwin/magpie.icns is a hand-built equivalent of what it
+# writes: the same elements, types and order.
 icons:
 	@go run build/icon/gen.go tray internal/gui/tray.png
 	@go run build/icon/gen.go tray-flap internal/gui/trayflap

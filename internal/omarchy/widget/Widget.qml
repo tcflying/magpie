@@ -20,7 +20,7 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: String.fromCodePoint(0xf15c6) // nf-md-bird
+    text: String.fromCodePoint(0xf0765) // nf-md-circle
     tooltipText: "magpie"
     onPressed: function(b) {
       Quickshell.execDetached(b === Qt.RightButton ? [root.magpie, "app"] : [root.magpie, "panel"])

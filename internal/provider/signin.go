@@ -927,9 +927,11 @@ func addLogin(l savedLogin) (using bool, err error) {
 }
 
 // signInPage is what the browser shows at the end: magpie's, in its own
-// quiet black and white, never the vendor's "return to the CLI".
-// magpieLogo is magpie's mark (build/icon/magpie-small.svg), signing the
-// page the browser lands on after a sign-in.
+// quiet black and white but for the app's green disc in the footer, never
+// the vendor's "return to the CLI".
+// magpieLogo is magpie's mark: the app's green disc (a copy of
+// internal/gui/assets/icons/favicon.svg, the circle build/icon/magpie.svg
+// draws), signing the page the browser lands on after a sign-in.
 //
 //go:embed magpie.svg
 var magpieLogo string
@@ -953,9 +955,11 @@ body{background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,BlinkMacSy
 .card{width:100%%;max-width:380px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:32px 28px;text-align:center;animation:in .4s cubic-bezier(.2,.8,.2,1)}
 .mark{width:44px;height:44px;margin:0 auto 18px;border-radius:50%%;display:grid;place-items:center;background:var(--fg);color:var(--bg)}
 .mark svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.mark svg path{fill:none}
 h1{font-size:18px;font-weight:620;margin:0 0 6px;letter-spacing:-.01em}p{margin:0;color:var(--muted);font-size:14px;overflow-wrap:anywhere}
 .by{margin-top:24px;display:flex;align-items:center;justify-content:center;gap:7px;font-size:12.5px;font-weight:560;color:var(--muted);letter-spacing:.01em}
-.by svg{width:20px;height:20px;fill:currentColor}
+.by svg{width:20px;height:20px;fill:#14B789}
+@media (prefers-color-scheme:dark){.by svg{fill:#2AD39B}}
 @keyframes in{from{opacity:0;transform:translateY(6px) scale(.98)}}
 </style></head><body><div class="card"><div class="mark"><svg viewBox="0 0 24 24">%[3]s</svg></div>
 <h1>%[1]s</h1><p>%[2]s</p><div class="by">%[4]smagpie</div></div></body></html>`, html.EscapeString(title), html.EscapeString(msg), mark, magpieLogo)

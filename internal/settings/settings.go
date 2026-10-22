@@ -371,9 +371,9 @@ type Settings struct {
 	// is its windows stacked alone, a thin line between one card and the
 	// next.
 	TrayNoLogos bool `json:"trayNoLogos,omitempty"`
-	// TrayNoBird leaves magpie's bird out of the Mac menu bar while the
+	// TrayNoBird leaves magpie's mark out of the Mac menu bar while the
 	// cards are there, the cards alone (KevinXC on Discord); a click on one
-	// still opens the panel, and with no cards the bird is shown.
+	// still opens the panel, and with no cards the mark is shown.
 	TrayNoBird bool `json:"trayNoBird,omitempty"`
 	// TrayPace puts each window's Pace number beside its figure in the
 	// menu bar ("42% +12%"), as the Usage page's cards have it (fflake33

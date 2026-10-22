@@ -10,7 +10,7 @@ import (
 // 3 (NewIconFromResource(GetModuleHandle(""), 3) in its
 // webview_window_windows.go), and go-winres makes a numeric ID only of a
 // "#n" key. Named "APP", the group had no ID 3, so the taskbar and Alt-Tab
-// showed Windows' blank page instead of the bird (#1777).
+// showed Windows' blank page instead of the app's mark (#1777).
 func TestWindowsIconIsResourceThree(t *testing.T) {
 	b, err := os.ReadFile("../../build/windows/winres.json")
 	if err != nil {

@@ -27,7 +27,7 @@ func TestTrayImageNoBird(t *testing.T) {
 			nb, nw, nh := trayImagePNG(cs, nil, 22, 2, dark, false)
 			// the mark 22pt and its 2pt gap, at 2x
 			if d := ww - nw; d < 47 || d > 49 || nh != h {
-				t.Fatalf("dark %v: %dx%d with the bird, %dx%d without", dark, ww, h, nw, nh)
+				t.Fatalf("dark %v: %dx%d with the mark, %dx%d without", dark, ww, h, nw, nh)
 			}
 			with, err := png.Decode(bytes.NewReader(wb))
 			if err != nil {
@@ -51,7 +51,7 @@ func TestTrayImageNoBird(t *testing.T) {
 				}
 			}
 			if differ > nw*h/100 {
-				t.Errorf("dark %v plain %v: %d of %d px differ from the cells drawn beside the bird", dark, cs[0].Plain, differ, nw*h)
+				t.Errorf("dark %v plain %v: %d of %d px differ from the cells drawn beside the mark", dark, cs[0].Plain, differ, nw*h)
 			}
 		}
 	}
