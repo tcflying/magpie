@@ -39,7 +39,7 @@ func TestTrayImage(t *testing.T) {
 			// colour: dark on the light bar, light on the dark one
 			ink := inkIn(img, image.Rect(0, 0, 44, 44), dark)
 			if ink < 40 {
-				t.Errorf("%d cells, dark %v: the bird has %d px of ink", n, dark, ink)
+				t.Errorf("%d cells, dark %v: the mark has %d px of ink", n, dark, ink)
 			}
 			// and the last card's, in what it adds to the width
 			if n > 0 {
@@ -59,7 +59,7 @@ func TestTrayImage(t *testing.T) {
 	// each card widens it, by no more than a modest cell
 	for dark, ws := range widths {
 		if ws[0] > 52 {
-			t.Errorf("dark %v: the bird alone is %d px", dark, ws[0])
+			t.Errorf("dark %v: the mark alone is %d px", dark, ws[0])
 		}
 		for i := 1; i < len(ws); i++ {
 			if d := ws[i] - ws[i-1]; d < 40 || d > 110 {
@@ -93,7 +93,7 @@ func TestTrayImageCellAt(t *testing.T) {
 	_, w, _ := trayImagePNG(cells, bird, h, 2, false, false)
 	width := float64(w) / 2
 	if at := trayImageCellAt(cells, h, 5); at != -1 {
-		t.Errorf("a click by the bird says cell %d", at)
+		t.Errorf("a click by the mark says cell %d", at)
 	}
 	if at := trayImageCellAt(cells, h, width-0.5); at != len(cells)-1 {
 		t.Errorf("a click at the image's end says cell %d, want %d", at, len(cells)-1)
@@ -234,7 +234,7 @@ func TestTrayImageClickIdentity(t *testing.T) {
 	cells, _, _ := trayUsageView(cards, time.Now(), false, false)
 	for _, layout := range [][]trayCell{cells, trayPlain(cells)} {
 		if trayImageClickAt(layout, true, 22, 5, 0) {
-			t.Fatal("bird intercepted")
+			t.Fatal("the mark intercepted")
 		}
 		x := trayImageCellStart(layout, 22, 1) + 1
 		// AppKit's Shift, Control, Option and Command modifier bits.
@@ -270,7 +270,7 @@ func TestTrayImageClickWithoutBird(t *testing.T) {
 		for i := range layout {
 			x := trayImageCellStart(layout, 22, i) - (22 + 2) + 1 // the same cell, with no mark before it
 			if trayImageClickAt(layout, false, 22, x, 0) {
-				t.Fatalf("cell %d taken for its card with no bird", i)
+				t.Fatalf("cell %d taken for its card with no mark", i)
 			}
 		}
 	}

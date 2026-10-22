@@ -1,20 +1,22 @@
 // Run with Node's test runner and Playwright on the module path; see README.md.
-// The header's mark: the app's disc (build/icon/magpie.svg) in the app's green,
-// breathing when the window opens and the pointer comes over it. The bird is
-// out of the mark; its path stays in the document, because the Routing page
-// still draws its marks with a use of #bird (plugins/routing/client.js).
+// The header's mark: the app's disc (build/icon/magpie.svg) in the app's green
+// (build/icon/gen.go), breathing when the window opens and the pointer comes
+// over it. The expectations are read out of the brand source, not written out
+// here: a copy of the numbers would only hold the copy. The old shape is out
+// of the mark; the Routing page's bird path stays in the document, because that
+// page still draws its marks with a use of #bird (plugins/routing/client.js).
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { test } = require("node:test");
 const { chromium, webkit } = require("playwright");
 
+const repoRoot = path.resolve(__dirname, "../../..");
 const assets = process.env.MAGPIE_LOGO_ASSETS || path.resolve(__dirname, "../assets");
-
-// the disc build/icon/magpie.svg draws, and the two greens build/icon/gen.go
-// fills it with
-const DISC = { cx: "22", cy: "22", r: "21.6" };
-const GREEN = { light: "rgb(20, 183, 137)", dark: "rgb(42, 211, 155)" };
+// the brand source the mark is held to: the shape build/icon/magpie.svg draws
+// and the greens build/icon/gen.go fills it with
+const brandSVG = process.env.MAGPIE_LOGO_SVG || path.join(repoRoot, "build", "icon", "magpie.svg");
+const brandGen = process.env.MAGPIE_LOGO_GEN || path.join(repoRoot, "build", "icon", "gen.go");
 
 function serve(theme) {
   const providers = { providers: [], presets: [], excluded: [], gateway: { running: true, window: true } };
@@ -34,6 +36,100 @@ function serve(theme) {
   };
 }
 
+// a file that can't be read says nothing about the brand
+async function readText(file) {
+  try {
+    return await fs.readFile(file, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+// the disc the brand source draws: the points on the path's curve, a
+// command's end with its control points left out (a circle's control points
+// sit off it, on its tangents). Those are the disc's own points, so the
+// centre is the middle of their box and the radius how far they are from it
+function discOf(svg) {
+  const box = svg.match(/viewBox="([^"]+)"/);
+  const paths = svg.match(/<path\b/g) || [];
+  const d = svg.match(/\sd="([^"]+)"/);
+  if (!box || !d || paths.length !== 1) return null;
+  const points = pathPoints(d[1]);
+  if (!points.length) return null;
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+  const r = points.reduce((sum, p) => sum + Math.hypot(p[0] - cx, p[1] - cy), 0) / points.length;
+  return { viewBox: box[1].trim().split(/\s+/).join(" "), cx, cy, r };
+}
+
+// the points on the curve: the end of every move, line and curve
+function pathPoints(d) {
+  const tokens = d.match(/[A-Za-z]|-?\d*\.?\d+(?:[eE][-+]?\d+)?/g) || [];
+  const points = [];
+  let i = 0;
+  let cmd = "";
+  const num = () => Number(tokens[i++]);
+  while (i < tokens.length) {
+    if (/[A-Za-z]/.test(tokens[i])) cmd = tokens[i++];
+    switch (cmd) {
+      case "M":
+      case "L": {
+        const x = num();
+        const y = num();
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        points.push([x, y]);
+        cmd = "L"; // the pairs after a move are lines
+        break;
+      }
+      case "C": {
+        num();
+        num();
+        num();
+        num(); // the two control points, off the curve
+        const x = num();
+        const y = num();
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        points.push([x, y]);
+        break;
+      }
+      case "Z":
+        break;
+      default:
+        return null; // a command this does not read
+    }
+  }
+  return points;
+}
+
+// the two greens the brand source paints the icon with: the light one and the
+// dark theme's own shade of it, read out of the generator's own source
+function greensOf(gen) {
+  const start = gen.indexOf("func app(");
+  if (start < 0) return null;
+  const end = gen.indexOf("\nfunc ", start);
+  const body = gen.slice(start, end < 0 ? undefined : end);
+  const light = body.match(/gr,\s*gg,\s*gb\s*:=\s*([^;\n]+)/);
+  const dark = body.match(/gr,\s*gg,\s*gb\s*=\s*([^;\n]+)/);
+  if (!light || !dark) return null;
+  const shade = body.indexOf("if dark");
+  if (shade < 0 || body.indexOf(dark[0]) < shade) return null;
+  const bytes = (s) => (s.match(/0x[0-9a-fA-F]{2}/g) || []).map((h) => parseInt(h.slice(2), 16));
+  const l = bytes(light[1]);
+  const d = bytes(dark[1]);
+  if (l.length !== 3 || d.length !== 3) return null;
+  return { light: l, dark: d };
+}
+
+// the channels a fill names, its three colours
+function channels(fill) {
+  const m = String(fill).match(/rgba?\(([^)]+)\)/);
+  if (!m) return null;
+  const parts = m[1].split(/[,/]/).map((v) => parseFloat(v));
+  return parts.length >= 3 ? parts.slice(0, 3) : null;
+}
+
 for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium", "webkit"])) {
   test(`${engine}: the header's mark is the app's disc`, async (t) => {
     const browser = await (engine === "webkit" ? webkit.launch() : chromium.launch({ channel: "chromium" }));
@@ -51,24 +147,33 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
       const logo = page.locator(".brand .logo");
       assert.ok(await logo.isVisible(), `${where}: the mark`);
       const svg = logo.locator("svg");
-      assert.equal(await svg.getAttribute("viewBox"), "0 0 44 44", `${where}: the disc's grid`);
       assert.equal(await svg.getAttribute("width"), "18", `${where}: the mark's width`);
       assert.equal(await svg.getAttribute("height"), "18", `${where}: the mark's height`);
-      // the disc the app icon is drawn: the same circle on the same grid
+      // the disc the app icon is drawn: the same circle, nothing else in it
       const circle = logo.locator("circle");
       assert.equal(await circle.count(), 1, `${where}: the mark is the disc`);
-      for (const [k, v] of Object.entries(DISC)) assert.equal(await circle.getAttribute(k), v, `${where}: the disc's ${k}`);
-      // the app's green, the shade of it the theme asks for
-      assert.equal(await circle.evaluate((c) => getComputedStyle(c).fill), GREEN[theme], `${where}: the mark's green`);
-      // the bird is out of the mark: nothing in it draws the old shape
-      assert.equal(await logo.locator("path, use, g").count(), 0, `${where}: the bird is out of the mark`);
+      assert.equal(await logo.locator("path, use, g").count(), 0, `${where}: the old shape is out of the mark`);
       assert.equal(await logo.locator("[id]").count(), 0, `${where}: the mark holds no definition`);
+      // and the disc it draws is the brand's own: the shape and the greens are
+      // read out of the brand source, so a change there holds the mark to it
+      const disc = discOf(await readText(brandSVG));
+      assert.ok(disc, "the brand source: build/icon/magpie.svg's disc is read");
+      assert.equal(await svg.getAttribute("viewBox"), disc.viewBox, `${where}: the disc's grid`);
+      for (const k of ["cx", "cy", "r"]) {
+        const got = Number(await circle.getAttribute(k));
+        assert.ok(Math.abs(got - disc[k]) < 1e-6, `${where}: the disc's ${k} is ${got}, want the brand's ${disc[k]}`);
+      }
+      // the app's green, the shade of it the theme asks for
+      const greens = greensOf(await readText(brandGen));
+      assert.ok(greens, "the brand source: build/icon/gen.go's greens are read");
+      const fill = await circle.evaluate((c) => getComputedStyle(c).fill);
+      assert.deepEqual(channels(fill), greens[theme], `${where}: the mark's green`);
       // the wordmark keeps the ink, only the mark is green
       const word = page.locator(".brand > span:not(.logo)");
       assert.equal((await word.textContent()).trim(), "magpie", `${where}: the wordmark`);
       const ink = await word.evaluate((w) => getComputedStyle(w).color);
       assert.equal(ink, await page.evaluate(() => getComputedStyle(document.body).color), `${where}: the wordmark keeps the ink`);
-      assert.notEqual(ink, GREEN[theme], `${where}: the wordmark is not the mark's green`);
+      assert.notDeepEqual(channels(ink), greens[theme], `${where}: the wordmark is not the mark's green`);
       assert.deepEqual(errors, [], where);
       await context.close();
     }
