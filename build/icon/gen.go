@@ -1,7 +1,7 @@
 //go:build ignore
 
 // Icon generator. Everything magpie shows is drawn from one shape: a filled
-// disc on a 44-unit grid, the app's green. magpie.svg is the full drawing;
+// disc on a 44-unit grid, the app's yellow. magpie.svg is the full drawing;
 // the app tile uses it from 64px up. magpie-small.svg is the same disc (the
 // bird's eye was the only thing it dropped, and a disc has no eye); the tray
 // and the smaller tiles use it.
@@ -142,7 +142,7 @@ func trayFlap(dir string, S int) error {
 	return nil
 }
 
-// glyph is the disc alone, in the app's green, as big on an n-pixel canvas
+// glyph is the disc alone, in the app's yellow, as big on an n-pixel canvas
 // as app draws it on its tile: the layer of build/darwin/AppIcon.icon, which
 // macOS 26 lays on a tile of its own, light or dark (#117).
 func glyph(n int) image.Image {
@@ -155,14 +155,14 @@ func glyph(n int) image.Image {
 		if a <= 0 {
 			continue
 		}
-		img.SetNRGBA(i%n, i/n, color.NRGBA{0x14, 0xb7, 0x89, uint8(a*255 + 0.5)})
+		img.SetNRGBA(i%n, i/n, color.NRGBA{0xfa, 0xcc, 0x15, uint8(a*255 + 0.5)})
 	}
 	return img
 }
 
-// app draws the app's icon: the shape in the app's green, on transparency.
+// app draws the app's icon: the shape in the app's yellow, on transparency.
 // The shape is a filled disc, so the white tile the bird sat on is gone:
-// what shows is a green disc, the taskbar's, the tray's and the Dock's alike.
+// what shows is a yellow disc, the taskbar's, the tray's and the Dock's alike.
 func app(n int, dark bool) image.Image {
 	S := float64(n)
 	// the disc fills the canvas, a hair's margin off its edge
@@ -180,11 +180,11 @@ func app(n int, dark bool) image.Image {
 		shape = smallSVG
 	}
 	cov := coverage(parse(shape), n, ss, k, o, o)
-	gr, gg, gb := uint8(0x14), uint8(0xb7), uint8(0x89)
+	gr, gg, gb := uint8(0xfa), uint8(0xcc), uint8(0x15)
 	if dark {
 		// the Dock's dark appearance (macOS 26): the disc a shade lighter, so
 		// it keeps its own colour on a dark tile (#117)
-		gr, gg, gb = 0x2a, 0xd3, 0x9b
+		gr, gg, gb = 0xfd, 0xe0, 0x47
 	}
 	img := image.NewNRGBA(image.Rect(0, 0, n, n))
 	for i, a := range cov {
@@ -214,7 +214,7 @@ const trayWindowsFill = 1.0
 var trayWindowsSizes = []int{16, 20, 24, 28, 32, 36, 40, 48, 64}
 
 // trayWindows draws the disc for Windows' notification area: the app's
-// mark, full bleed, in the app's green.
+// mark, full bleed, in the app's yellow.
 func trayWindows(n int) image.Image {
 	S := float64(n)
 	// the shape's disc is 43.20 units across in its 44-unit box (its path
@@ -227,7 +227,7 @@ func trayWindows(n int) image.Image {
 		if a <= 0 {
 			continue
 		}
-		img.SetNRGBA(i%n, i/n, color.NRGBA{0x14, 0xb7, 0x89, uint8(a*255 + 0.5)})
+		img.SetNRGBA(i%n, i/n, color.NRGBA{0xfa, 0xcc, 0x15, uint8(a*255 + 0.5)})
 	}
 	return img
 }

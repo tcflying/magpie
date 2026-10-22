@@ -39,7 +39,19 @@ func TestNewer(t *testing.T) {
 }
 
 func TestReleased(t *testing.T) {
-	for v, want := range map[string]bool{"0.1.0": true, "v1.2.3": true, "dev": false, "0bcb2cc-dirty": false, "v0.1.0-3-g0bcb2cc": false} {
+	for v, want := range map[string]bool{
+		"0.1.0":             true,
+		"v1.2.3":            true,
+		"dev":               false,
+		"0bcb2cc-dirty":     false,
+		"v0.1.0-3-g0bcb2cc": false,
+		// a build from source is never a release, however it is marked: the
+		// yellow fork's version carries git describe's "-<n>-g<hash>" and a
+		// "+yellow" build tag, so the official release never installs over it
+		"v0.1.1327-5-g6d812fc3+yellow":       false,
+		"v0.1.1327-5-g6d812fc3-dirty+yellow": false,
+		"v0.1.1327-6-g0123456789ab+yellow":   false,
+	} {
 		if Released(v) != want {
 			t.Errorf("Released(%q) != %v", v, want)
 		}

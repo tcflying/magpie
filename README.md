@@ -2,20 +2,23 @@
 > [!IMPORTANT]
 > **This is [`tcflying/magpie`](https://github.com/tcflying/magpie) — a fork of magpie, not the upstream release.**
 >
-> Upstream is [`yetone/magpie`](https://github.com/yetone/magpie) (MIT, home page [usemagpie.ai](https://usemagpie.ai)). This fork sits 4 commits on top of upstream's `7aad6a50`, the commit it was forked from (ahead 4, behind 0 at the fork point; upstream's main has moved on since — it was at `398803e3` when this note was written). It changes the app's branding and its Windows tray; everything else is upstream's own.
+> Upstream is [`yetone/magpie`](https://github.com/yetone/magpie) (MIT, home page [usemagpie.ai](https://usemagpie.ai)). This fork takes upstream's code as its base and adds its own changes on top of it. It changes the app's branding and its Windows tray; everything else is upstream's own.
 >
 > What this fork changes:
 >
-> - **The app's mark is a green disc, not a magpie.** Every mark of magpie's own — the window icon, the sign-in page, the Agents list, the site logo, the Omarchy widget — is now the brand's green solid disc, drawn from [`build/icon/magpie.svg`](build/icon/magpie.svg) (green `#14b789`, dark theme `#2ad39b`).
+> - **The app's mark is a yellow disc, not a magpie.** The marks the app paints — the window icon, the header, the sign-in page, the Agents list — are the brand's solid yellow disc, drawn from [`build/icon/magpie.svg`](build/icon/magpie.svg) (yellow `#facc15`, dark theme `#fde047`). The site's own logo picture (`site/public/img/icon-256.png`) carries the yellow disc as well, while the site's SVG and the Omarchy widget are the same disc drawn in whatever colour their own theme paints them. Upstream draws a magpie bird; this fork draws that disc instead. The disc was green when this fork started, and turning it yellow is an ordinary follow-up edit of the green version — the green version is still in this fork's history.
 > - **The Windows tray's icon fills its cell.** The disc bleeds to the edges of the notification area at every size Windows asks for (16/20/24/28/32/36/40/48/64), so it measures 20x20 physical pixels beside the other icons, where it measured 18x18.
-> - **A Chinese tutorial for the green disc on Windows.** See [`docs/tutorial.zh-CN.md`](docs/tutorial.zh-CN.md).
+> - **A Chinese tutorial for the yellow disc on Windows.** See [`docs/tutorial.zh-CN.md`](docs/tutorial.zh-CN.md).
+> - **Platforms.** The Windows build of this fork is built locally (`ops/yellow-20261023/artifacts/magpie-yellow.exe`). The macOS app's `Assets.car` can only be rebuilt on macOS, so the Dock icon there is not guaranteed to carry the yellow disc.
 >
-> The four commits on top of upstream:
+> **Keep the fork's build, not the official one.** A build made from this fork's source carries git describe's `-<n>-g<commit>` and a `+yellow` suffix, so the app reads it as not a released build and doesn't turn itself into the official one. The official release is built from upstream, so it carries the bird, not the yellow disc: don't overwrite this build with an official one by hand, take new versions from this fork's source instead. The download and install commands further down this page are upstream's own and install the official build — to run this fork on Windows, build it from source as the tutorial shows.
 >
-> 1. `a9fd5201` gui: the app's mark is a green disc, not a magpie
-> 2. `a821f534` gui: the rest of magpie's marks are the app's disc too
-> 3. `56fe6195` gui: the tray's icon is the size of the icons beside it
-> 4. `d378091b` docs: a Windows tutorial for the green disc
+> This fork's history was rebuilt on 2026-10-23 on top of upstream commit `398803e3`, the upstream main it was based on that day. Upstream can move on independently, so no "ahead N, behind M" count is written down here on purpose. In your own clone, run these to see what this fork changed:
+>
+> ```sh
+> git log --oneline 398803e3..HEAD
+> git diff --stat 398803e3..HEAD
+> ```
 >
 > No pull request has been sent upstream; this fork never pushes to `yetone/magpie`.
 <!-- fork 说明结束 -->

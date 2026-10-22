@@ -1357,9 +1357,9 @@ window, whose title bar has them; shown in the Mac window.
 
 `logo-mark.test.cjs` holds the header's mark, which is the app's disc and not
 the bird: the circle the app icon draws, on the 44-unit grid, filled with the
-app's green (#14b789, and the dark theme's own #2ad39b), with no path, no
+app's yellow (#facc15, and the dark theme's own #fde047), with no path, no
 `use` and no definition left in the mark, while the wordmark beside it still
-reads magpie and keeps the page's ink, not the mark's green. The mark breathes
+reads magpie and keeps the page's ink, not the mark's yellow. The mark breathes
 when the window opens and when the pointer comes over it, on the disc's
 `logo-pulse` for the tray flap's .9s, and rests when the breath is over. The
 bird's path stays in the document whatever the mark draws now: the Routing page
@@ -1367,10 +1367,10 @@ still draws its marks with a use of #bird, so that path has to be there for it
 to draw them. English, in the light and dark themes, on the engine `BROWSER`
 names (Chromium and WebKit by default), with no page error.
 
-The disc and the greens are read out of the brand source, not written out in
+The disc and the colours are read out of the brand source, not written out in
 the test: the shape out of the path of `build/icon/magpie.svg` (the points on
 its curve, a command's end with the control points left out) and the two
-greens out of `build/icon/gen.go`. So a change to the brand holds the mark to
+colours out of `build/icon/gen.go`. So a change to the brand holds the mark to
 it, and the test fails by naming what differs. `MAGPIE_LOGO_ASSETS` points it
 at another assets directory, `MAGPIE_LOGO_SVG` at another brand SVG and
 `MAGPIE_LOGO_GEN` at another generator, to see it fail on the old artwork.

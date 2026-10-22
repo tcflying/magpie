@@ -927,9 +927,9 @@ func addLogin(l savedLogin) (using bool, err error) {
 }
 
 // signInPage is what the browser shows at the end: magpie's, in its own
-// quiet black and white but for the app's green disc in the footer, never
+// quiet black and white but for the app's yellow disc in the footer, never
 // the vendor's "return to the CLI".
-// magpieLogo is magpie's mark: the app's green disc (a copy of
+// magpieLogo is magpie's mark: the app's yellow disc (a copy of
 // internal/gui/assets/icons/favicon.svg, the circle build/icon/magpie.svg
 // draws), signing the page the browser lands on after a sign-in.
 //
@@ -958,8 +958,8 @@ body{background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,BlinkMacSy
 .mark svg path{fill:none}
 h1{font-size:18px;font-weight:620;margin:0 0 6px;letter-spacing:-.01em}p{margin:0;color:var(--muted);font-size:14px;overflow-wrap:anywhere}
 .by{margin-top:24px;display:flex;align-items:center;justify-content:center;gap:7px;font-size:12.5px;font-weight:560;color:var(--muted);letter-spacing:.01em}
-.by svg{width:20px;height:20px;fill:#14B789}
-@media (prefers-color-scheme:dark){.by svg{fill:#2AD39B}}
+.by svg{width:20px;height:20px;fill:#FACC15}
+@media (prefers-color-scheme:dark){.by svg{fill:#FDE047}}
 @keyframes in{from{opacity:0;transform:translateY(6px) scale(.98)}}
 </style></head><body><div class="card"><div class="mark"><svg viewBox="0 0 24 24">%[3]s</svg></div>
 <h1>%[1]s</h1><p>%[2]s</p><div class="by">%[4]smagpie</div></div></body></html>`, html.EscapeString(title), html.EscapeString(msg), mark, magpieLogo)

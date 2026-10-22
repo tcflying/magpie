@@ -1,20 +1,32 @@
 // Run with Node's test runner and Playwright on the module path; see README.md.
-// The header's mark: the app's disc (build/icon/magpie.svg) in the app's green
+// The header's mark: the app's disc (build/icon/magpie.svg) in the app's yellow
 // (build/icon/gen.go), breathing when the window opens and the pointer comes
-// over it. The expectations are read out of the brand source, not written out
-// here: a copy of the numbers would only hold the copy. The old shape is out
-// of the mark; the Routing page's bird path stays in the document, because that
-// page still draws its marks with a use of #bird (plugins/routing/client.js).
+// over it.
+// The shape is read out of the brand source (build/icon/magpie.svg), so a
+// change to the disc holds the mark to it; the colours are fixed expectations
+// written out here, so the mark is held to the brand's own yellow and not to
+// whatever the generator happens to paint.
+// The old shape is out of the mark; the Routing page's bird path stays in the
+// document, because that page still draws its marks with a use of #bird
+// (plugins/routing/client.js).
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { test } = require("node:test");
 const { chromium, webkit } = require("playwright");
 
+// The brand's own colours, written out: the light theme's yellow and the
+// dark theme's own shade of it. A test that read them from the implementation
+// would hold whatever the implementation says.
+const BRAND = {
+  light: [250, 204, 21], // #FACC15
+  dark: [253, 224, 71], // #FDE047
+};
+
 const repoRoot = path.resolve(__dirname, "../../..");
 const assets = process.env.MAGPIE_LOGO_ASSETS || path.resolve(__dirname, "../assets");
 // the brand source the mark is held to: the shape build/icon/magpie.svg draws
-// and the greens build/icon/gen.go fills it with
+// and the colours build/icon/gen.go fills it with
 const brandSVG = process.env.MAGPIE_LOGO_SVG || path.join(repoRoot, "build", "icon", "magpie.svg");
 const brandGen = process.env.MAGPIE_LOGO_GEN || path.join(repoRoot, "build", "icon", "gen.go");
 
@@ -103,9 +115,9 @@ function pathPoints(d) {
   return points;
 }
 
-// the two greens the brand source paints the icon with: the light one and the
+// the two colours the brand source paints the icon with: the light one and the
 // dark theme's own shade of it, read out of the generator's own source
-function greensOf(gen) {
+function brandOf(gen) {
   const start = gen.indexOf("func app(");
   if (start < 0) return null;
   const end = gen.indexOf("\nfunc ", start);
@@ -154,7 +166,7 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
       assert.equal(await circle.count(), 1, `${where}: the mark is the disc`);
       assert.equal(await logo.locator("path, use, g").count(), 0, `${where}: the old shape is out of the mark`);
       assert.equal(await logo.locator("[id]").count(), 0, `${where}: the mark holds no definition`);
-      // and the disc it draws is the brand's own: the shape and the greens are
+      // and the disc it draws is the brand's own: the shape and the colours are
       // read out of the brand source, so a change there holds the mark to it
       const disc = discOf(await readText(brandSVG));
       assert.ok(disc, "the brand source: build/icon/magpie.svg's disc is read");
@@ -163,17 +175,21 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
         const got = Number(await circle.getAttribute(k));
         assert.ok(Math.abs(got - disc[k]) < 1e-6, `${where}: the disc's ${k} is ${got}, want the brand's ${disc[k]}`);
       }
-      // the app's green, the shade of it the theme asks for
-      const greens = greensOf(await readText(brandGen));
-      assert.ok(greens, "the brand source: build/icon/gen.go's greens are read");
+      // the app's yellow, the shade of it the theme asks for
+      const brand = brandOf(await readText(brandGen));
+      assert.ok(brand, "the brand source: build/icon/gen.go's colours are read");
+      // and they are the brand's own yellow, written out here: the generator
+      // is held to the yellow, not the other way round
+      assert.deepEqual(brand.light, BRAND.light, "the brand source's light colour is the brand's yellow");
+      assert.deepEqual(brand.dark, BRAND.dark, "the brand source's dark colour is the brand's own shade");
       const fill = await circle.evaluate((c) => getComputedStyle(c).fill);
-      assert.deepEqual(channels(fill), greens[theme], `${where}: the mark's green`);
-      // the wordmark keeps the ink, only the mark is green
+      assert.deepEqual(channels(fill), BRAND[theme], `${where}: the mark's yellow`);
+      // the wordmark keeps the ink, only the mark is yellow
       const word = page.locator(".brand > span:not(.logo)");
       assert.equal((await word.textContent()).trim(), "magpie", `${where}: the wordmark`);
       const ink = await word.evaluate((w) => getComputedStyle(w).color);
       assert.equal(ink, await page.evaluate(() => getComputedStyle(document.body).color), `${where}: the wordmark keeps the ink`);
-      assert.notDeepEqual(channels(ink), greens[theme], `${where}: the wordmark is not the mark's green`);
+      assert.notDeepEqual(channels(ink), BRAND[theme], `${where}: the wordmark is not the mark's yellow`);
       assert.deepEqual(errors, [], where);
       await context.close();
     }
