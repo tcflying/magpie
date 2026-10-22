@@ -1,3 +1,24 @@
+<!-- fork 说明开始 -->
+> [!IMPORTANT]
+> **This is [`tcflying/magpie`](https://github.com/tcflying/magpie) — a fork of magpie, not the upstream release.**
+>
+> Upstream is [`yetone/magpie`](https://github.com/yetone/magpie) (MIT, home page [usemagpie.ai](https://usemagpie.ai)). This fork sits 4 commits on top of upstream's `7aad6a50`, the commit it was forked from (ahead 4, behind 0 at the fork point; upstream's main has moved on since — it was at `398803e3` when this note was written). It changes the app's branding and its Windows tray; everything else is upstream's own.
+>
+> What this fork changes:
+>
+> - **The app's mark is a green disc, not a magpie.** Every mark of magpie's own — the window icon, the sign-in page, the Agents list, the site logo, the Omarchy widget — is now the brand's green solid disc, drawn from [`build/icon/magpie.svg`](build/icon/magpie.svg) (green `#14b789`, dark theme `#2ad39b`).
+> - **The Windows tray's icon fills its cell.** The disc bleeds to the edges of the notification area at every size Windows asks for (16/20/24/28/32/36/40/48/64), so it measures 20x20 physical pixels beside the other icons, where it measured 18x18.
+> - **A Chinese tutorial for the green disc on Windows.** See [`docs/tutorial.zh-CN.md`](docs/tutorial.zh-CN.md).
+>
+> The four commits on top of upstream:
+>
+> 1. `a9fd5201` gui: the app's mark is a green disc, not a magpie
+> 2. `a821f534` gui: the rest of magpie's marks are the app's disc too
+> 3. `56fe6195` gui: the tray's icon is the size of the icons beside it
+> 4. `d378091b` docs: a Windows tutorial for the green disc
+>
+> No pull request has been sent upstream; this fork never pushes to `yetone/magpie`.
+<!-- fork 说明结束 -->
 <div align="center">
 
 <a href="https://usemagpie.ai"><img src="site/public/img/icon-256.png" width="112" alt="magpie"></a>
