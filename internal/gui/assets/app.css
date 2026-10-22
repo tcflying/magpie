@@ -171,6 +171,11 @@ code { font: var(--code-style, normal) var(--code-weight, 400) 11.5px var(--code
 .ic img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .ic .mask { width: 100%; height: 100%; background: currentColor; -webkit-mask: var(--i) center / contain no-repeat; mask: var(--i) center / contain no-repeat; }
 .ic.generic { color: var(--muted); }
+/* magpie's own logo: the app's disc (build/icon/magpie.svg). A mask takes its
+   shape from the picture and its colour from the paint, so the mark is the
+   app's green (--logo-fill, which the dark theme has its own shade of) and
+   not the ink of the row it stands in. */
+.ic[data-icon="magpie"] .mask { background: var(--logo-fill); }
 /* maskSpan's shelf: a hidden user of every mask picture loaded, so a logo drawn again paints at once (#1847) */
 .mask-shelf { position: fixed; top: 0; left: 0; width: 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
 .mask-shelf .mask { display: block; width: 16px; height: 16px; -webkit-mask: var(--i) center / contain no-repeat; mask: var(--i) center / contain no-repeat; }

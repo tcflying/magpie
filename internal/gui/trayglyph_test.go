@@ -31,7 +31,7 @@ func TestTrayIconPerOS(t *testing.T) {
 		}
 		glyph, _ := png.Decode(bytes.NewReader(trayIcon))
 		if img.Bounds() != glyph.Bounds() {
-			t.Fatalf("linux: %v, want the menu bar bird's %v", img.Bounds(), glyph.Bounds())
+			t.Fatalf("linux: %v, want the menu bar mark's %v", img.Bounds(), glyph.Bounds())
 		}
 		b := img.Bounds()
 		shown := 0
@@ -40,7 +40,7 @@ func TestTrayIconPerOS(t *testing.T) {
 				p := color.NRGBAModel.Convert(img.At(x, y)).(color.NRGBA)
 				g := color.NRGBAModel.Convert(glyph.At(x, y)).(color.NRGBA)
 				if p.A != g.A {
-					t.Fatalf("linux light=%v: alpha %d at %d,%d, want the bird's %d (a tile or another shape)", c.light, p.A, x, y, g.A)
+					t.Fatalf("linux light=%v: alpha %d at %d,%d, want the mark's %d (a tile or another shape)", c.light, p.A, x, y, g.A)
 				}
 				if p.A > 0 {
 					shown++
@@ -55,7 +55,7 @@ func TestTrayIconPerOS(t *testing.T) {
 		}
 	}
 	if icon, template := trayIconFor("darwin", false); !template || !bytes.Equal(icon, trayIcon) {
-		t.Errorf("darwin: want the template bird")
+		t.Errorf("darwin: want the template mark")
 	}
 	if icon, template := trayIconFor("windows", false); template || !bytes.Equal(icon, appIcon) {
 		t.Errorf("windows: want the app's own icon")
