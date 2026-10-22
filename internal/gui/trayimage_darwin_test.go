@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// The menu bar's image: the bird, then a cell for each card side by side,
+// The menu bar's image: the mark, then a cell for each card side by side,
 // drawn at twice the points for a Retina screen, in the bar's text colour
 // light or dark. MAGPIE_TRAY_PREVIEW=<dir> writes each as a PNG to look at.
 func TestTrayImage(t *testing.T) {
@@ -35,7 +35,7 @@ func TestTrayImage(t *testing.T) {
 				t.Fatalf("%d cells: %dx%d px, image %v", n, w, h, img.Bounds())
 			}
 			widths[dark] = append(widths[dark], w)
-			// the bird and each cell's digits are there, in the bar's text
+			// the mark and each cell's digits are there, in the bar's text
 			// colour: dark on the light bar, light on the dark one
 			ink := inkIn(img, image.Rect(0, 0, 44, 44), dark)
 			if ink < 40 {
@@ -257,9 +257,9 @@ func TestTrayImageClickIdentity(t *testing.T) {
 	}
 }
 
-// Without the bird the cards are the whole item: a click anywhere on them is
+// Without the mark the cards are the whole item: a click anywhere on them is
 // the item's own, which opens the panel on the tab left last, not
-// Allowances (the owner: with the bird off, every click opened Allowances).
+// Allowances (the owner: with the mark off, every click opened Allowances).
 func TestTrayImageClickWithoutBird(t *testing.T) {
 	prior := onTrayCellClick
 	t.Cleanup(func() { onTrayCellClick = prior })
@@ -268,7 +268,7 @@ func TestTrayImageClickWithoutBird(t *testing.T) {
 	cells, _, _ := trayUsageView(trayCards(), time.Now(), false, false)
 	for _, layout := range [][]trayCell{cells, trayPlain(cells)} {
 		for i := range layout {
-			x := trayImageCellStart(layout, 22, i) - (22 + 2) + 1 // the same cell, with no bird before it
+			x := trayImageCellStart(layout, 22, i) - (22 + 2) + 1 // the same cell, with no mark before it
 			if trayImageClickAt(layout, false, 22, x, 0) {
 				t.Fatalf("cell %d taken for its card with no bird", i)
 			}

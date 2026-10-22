@@ -30,7 +30,7 @@ func TestTrayImagePlain(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// at 2x: the bird 44 px, then 2pt, 3pt, the first card's digits
+		// at 2x: the mark 44 px, then 2pt, 3pt, the first card's digits
 		_, oneW, _ := trayImagePNG(plain[:1], bird, 22, 2, dark, false)
 		_, birdW, _ := trayImagePNG(nil, bird, 22, 2, dark, false)
 		// two logos and their gaps (14+3 each) gone, 3 before the first
@@ -38,7 +38,7 @@ func TestTrayImagePlain(t *testing.T) {
 		if d, want := logoW-w, 2*(2*(14+3)-3-(5+1+5-8)); d < want-2 || d > want+2 {
 			t.Errorf("dark %v: %d px with logos, %d without", dark, logoW, w)
 		}
-		// right after the bird come the digits, not an empty logo's room
+		// right after the mark come the digits, not an empty logo's room
 		if ink := inkIn(img, image.Rect(birdW, 0, birdW+10, h), dark); ink < 10 {
 			t.Errorf("dark %v: %d px of ink where the first card's digits start", dark, ink)
 		}

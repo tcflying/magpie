@@ -1355,6 +1355,24 @@ the app says Omarchy's bar isn't there; in English and Chinese.
 on Windows, macOS and Linux alike, beside the tabs; hidden in the Windows
 window, whose title bar has them; shown in the Mac window.
 
+`logo-mark.test.cjs` holds the header's mark, which is the app's disc and not
+the bird: the circle the app icon draws (cx 22, cy 22, r 21.6 on the 44-unit
+grid), filled with the app's green (#14b789, and the dark theme's own
+#2ad39b), with no path, no `use` and no definition left in the mark, while the
+wordmark beside it still reads magpie and keeps the page's ink, not the mark's
+green. The mark breathes when the window opens and when the pointer comes
+over it, on the disc's `logo-pulse` for the tray flap's .9s, and rests when
+the breath is over. The bird's path stays in the document whatever the mark
+draws now: the Routing page still draws its marks with a use of #bird, so that
+path has to be there for it to draw them. English, in the light and dark
+themes, on the engine `BROWSER` names (Chromium and WebKit by default), with
+no page error. `MAGPIE_LOGO_ASSETS` points it at another assets directory, to
+see it fail on the old mark.
+
+```sh
+node --test --test-concurrency=1 internal/gui/tests/logo-mark.test.cjs
+```
+
 `model-test-one.test.cjs` tests one model on its own from a provider's
 editor, in Chromium and WebKit, English and Chinese: a model chip's
 right-click opens "Test this model", which posts provider/test with that
