@@ -336,11 +336,11 @@ node --test --test-concurrency=1 internal/gui/tests/logo-mark.test.cjs
 | Wails 版本 | 从上游的 `v3.0.0-beta.24` 升到 `v3.0.0-beta.34`，顺带修好了 Windows 托盘右键菜单（第七节） |
 | 文档 | 这份教程，和 README 顶部的 fork 说明 |
 
-这个 fork 的历史在 2026-10-23 重建在上游 commit `fa22bc64` 之上（当天上游 main 的位置）。想看它相对上游到底改了什么，在自己的 clone 里跑：
+这个 fork 的历史在 2026-10-24 重建在上游 commit `84341795` 之上（当天上游 main 的位置）。想看它相对上游到底改了什么，在自己的 clone 里跑：
 
 ```powershell
-git log --oneline fa22bc64..HEAD
-git diff --stat fa22bc64..HEAD
+git log --oneline 84341795..HEAD
+git diff --stat 84341795..HEAD
 ```
 
 上游自己会往前走，所以这里不写「领先几个、落后几个」这种会过期的数字。
