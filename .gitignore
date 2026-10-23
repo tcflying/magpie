@@ -1,7 +1,9 @@
 /magpie
 /magpie.exe
+/magpie-cli.exe
 /magpie.app/
 /dist/
+/ops/
 /magpie-dev
 /rsrc_windows_*.syso
 /magpie-dev-backend
