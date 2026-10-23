@@ -2,7 +2,7 @@
 > [!IMPORTANT]
 > **This is [`tcflying/magpie`](https://github.com/tcflying/magpie) — a fork of magpie, not the upstream release.**
 >
-> Upstream is [`yetone/magpie`](https://github.com/yetone/magpie) (MIT, home page [usemagpie.ai](https://usemagpie.ai)). This fork takes upstream's code as its base and adds its own changes on top of it. It changes the app's branding, its Windows tray, and the Wails version it compiles against; everything else is upstream's own.
+> Upstream is [`yetone/magpie`](https://github.com/yetone/magpie) (MIT, home page [usemagpie.ai](https://usemagpie.ai)). This fork takes upstream's code as its base and adds its own changes on top of it. It changes the app's branding, its Windows tray, and the Wails version it compiles against; everything else is upstream's own — except the icons, which are the fork's own too: this fork keeps its own icon assets, its own `build/icon/gen.go` generator and its own `internal/gui/tray-windows.ico`, and upstream's newer icon assets and its newer version of that generator were not merged in.
 >
 > What this fork changes:
 >
@@ -10,7 +10,7 @@
 > - **The Windows tray's icon fills its cell.** The disc bleeds to the edges of the notification area at every size Windows asks for (16/20/24/28/32/36/40/48/64), so it measures 20x20 physical pixels beside the other icons, where it measured 18x18.
 > - **The Windows tray's right-click menu opens.** Upstream builds against Wails v3.0.0-beta.24, whose tray window procedure only handles `WM_RBUTTONUP`; but the tray icon uses `NOTIFYICON_VERSION_4`, under which the right click arrives as `WM_CONTEXTMENU`, so the menu never opened. This fork builds against Wails v3.0.0-beta.34, which carries upstream's fix ([wailsapp/wails#6162](https://github.com/wailsapp/wails/pull/6162)), so right-clicking the tray icon gives "open magpie / version / quit magpie".
 > - **A Chinese tutorial for the yellow disc on Windows.** See [`docs/tutorial.zh-CN.md`](docs/tutorial.zh-CN.md).
-> - **Platforms.** The Windows build of this fork is built locally (`ops/yellow-update-20261023-2210/artifacts/magpie-yellow.exe`). The macOS app's `Assets.car` can only be rebuilt on macOS, so the Dock icon there is not guaranteed to carry the yellow disc.
+> - **Platforms.** The Windows build of this fork is built locally from this fork's source, as the tutorial shows; the tutorial writes the executable into a local output directory under `ops/` (that whole directory is gitignored, so a fresh clone has no such path), so where the build lands depends on your own machine. The macOS app's `Assets.car` can only be rebuilt on macOS, so the Dock icon there is not guaranteed to carry the yellow disc.
 >
 > **Keep the fork's build, not the official one.** A build made from this fork's source carries git describe's `-<n>-g<commit>` and a `+yellow` suffix, so the app reads it as not a released build and doesn't turn itself into the official one. The official release is built from upstream, so it carries the bird, not the yellow disc: don't overwrite this build with an official one by hand, take new versions from this fork's source instead. The download and install commands further down this page are upstream's own and install the official build — to run this fork on Windows, build it from source as the tutorial shows.
 >

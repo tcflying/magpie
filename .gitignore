@@ -1,5 +1,6 @@
 /magpie
 /magpie.exe
+/magpie.exe.old*
 /magpie-cli.exe
 /magpie.app/
 /dist/
