@@ -3,6 +3,15 @@
 // first page.
 const PERIODS = [["today", "Today"], ["7d", "7 days"], ["30d", "30 days"], ["all", "All"]];
 
+// The reader's time zone, which magpie reads the period's days, the chart's
+// hours and a picked day in: magpie web may be read from another zone than
+// the computer's, whose days put a call at 9:00 in UTC+8 under 1:00 (Outvi V
+// on Discord). None, and magpie reads its own.
+function usageZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; }
+}
+const usageZoneQ = () => (usageZone() ? "&tz=" + encodeURIComponent(usageZone()) : "");
+
 // asked: the reader opened the page, so a Claude account's usage is read
 // at once, by running Claude Code's own /usage, rather than when its last
 // reading is due (every 5 to 15 minutes, at random, once Claude Code was used).
@@ -19,7 +28,7 @@ async function loadUsage(asked) {
   renderUsageLoading();
   if (!asked) loadQuotas();
   const p = period, read = ++usageRead;
-  const next = await api("usage?period=" + encodeURIComponent(p));
+  const next = await api("usage?period=" + encodeURIComponent(p) + usageZoneQ());
   if (read !== usageRead || view !== "usage" || usageTab !== "usage" || period !== p) return;
   usage = next;
   renderUsage();
@@ -693,6 +702,7 @@ function ledLeave() {
 
 function ledParams(extra) {
   const q = new URLSearchParams({ period });
+  if (usageZone()) q.set("tz", usageZone());
   if (ledDay) q.set("day", ledDay);
   if (ledAgent) q.set("agent", ledAgent);
   if (ledPurpose) q.set("purpose", ledPurpose);
@@ -1343,6 +1353,12 @@ function ledHScroll() {
   if (!over) return;
   bar.firstElementChild.style.width = wrap.scrollWidth - wrap.clientWidth + bar.clientWidth + "px";
   bar.scrollLeft = wrap.scrollLeft;
+  // a sticky box keeps clear of its scroller's padding, so at bottom 0 it
+  // stood the view's bottom padding above the window's foot, the table
+  // showing through the strip under it: it goes down over that padding
+  const view = bar.closest(".view");
+  const pad = view ? parseFloat(getComputedStyle(view).paddingBottom) || 0 : 0;
+  bar.style.bottom = -pad + "px";
 }
 $("#ledWrap").addEventListener("scroll", () => { const bar = $("#ledHScroll"); if (bar.scrollLeft !== $("#ledWrap").scrollLeft) bar.scrollLeft = $("#ledWrap").scrollLeft; }, { passive: true });
 $("#ledHScroll").addEventListener("scroll", () => { const wrap = $("#ledWrap"); if (wrap.scrollLeft !== $("#ledHScroll").scrollLeft) wrap.scrollLeft = $("#ledHScroll").scrollLeft; }, { passive: true });
@@ -1866,6 +1882,51 @@ function renderLedger() {
 //
 // The agents' own sessions, read from their session files: what each cost,
 // and the command that picks it up again. A segment of the Usage page.
+
+// A session's row and details, as this list and the Sessions page's
+// (plugins/sessions/client.js) both draw them.
+
+// sessModelNames lists models for a cost note, one an agent recorded no
+// name for told as such: joined bare, the note read "Not counted: , with
+// no known price" (tony, Discord)
+const sessModelNames = (models) => [...new Set(models.map((m) => m || t("a model with no name")))].join(", ");
+
+// wslBadge marks a session an agent ran in a WSL distro, read through
+// \\wsl.localhost; its resume command runs it there through wsl.exe
+function wslBadge(s) {
+  const b = el("span", "badge wsl", "WSL " + s.wsl);
+  b.title = t("In WSL {distro}: resumed there through wsl.exe", { distro: s.wsl });
+  return b;
+}
+
+// sessModelsText: a session's models, the first two and how many more, and
+// where magpie's gateway sent its calls, the most first: a routing group's
+// member and the reasoning it was asked for
+function sessModelsText(s) {
+  const via = s.via?.length ? "→ " + [s.via[0].model, s.via[0].effort].filter(Boolean).join(" · ") + (s.via.length > 1 ? " +" + (s.via.length - 1) : "") : "";
+  return sessModelNames(s.models.slice(0, 2).map((m) => m.model)) + (s.models.length > 2 ? " +" + (s.models.length - 2) : "") + (via ? " " + via : "");
+}
+
+// sessUsageDetail adds to a session's details what it spent by model, and
+// what the gateway sent its calls to, at what reasoning; line(label, value)
+// adds a line of the details
+function sessUsageDetail(d, s, line) {
+  if (s.models?.length) {
+    const m = el("div", "sess-models");
+    for (const x of s.models) {
+      m.append(el("span", "model", x.model || t("a model with no name")),
+        el("span", "n", t("{a} in · {b} out", { a: fmtN(x.input), b: fmtN(x.output) }) + (x.cache_read ? " · " + t("{n} cached", { n: fmtN(x.cache_read) }) : "") + (x.cache_write ? " · " + t("{n} written", { n: fmtN(x.cache_write) }) : "")),
+        el("span", "c" + (x.priced ? "" : " none"), x.priced ? "≈" + fmtCost({ cost: x.cost }) : "—"));
+    }
+    d.append(m);
+  }
+  (s.via || []).forEach((v, i) => line(i ? "" : t("Routed"), viaText(v) + " · " + t("{n} tokens", { n: fmtN(v.tokens) }) + (v.credited ? " · " + ledCredits(v).textContent : "")));
+}
+
+// one place a session's calls went through magpie, in words
+function viaText(v) {
+  return `${v.provider}/${v.model}` + (v.effort ? " · " + v.effort : "") + " · " + t("{n} calls", { n: v.calls });
+}
 
 const USAGE_TABS = [["usage", "Overview"], ["requests", "Requests"], ["sessions", "Sessions"], ["context", "Context"]];
 let usageTab = "usage";
@@ -3252,7 +3313,7 @@ function refreshUsage(now = false) {
         else if (usage && performance.now() - quotasAsked > 60e3) { quotasAsked = performance.now(); loadQuotas(); }
         if (usage) {
           const p = period, read = ++usageRead;
-          const u = await api("usage?period=" + encodeURIComponent(p));
+          const u = await api("usage?period=" + encodeURIComponent(p) + usageZoneQ());
           if (read === usageRead && view === "usage" && usageTab === "usage" && p === period) {
             if (JSON.stringify(u) !== JSON.stringify(usage)) { usage = u; renderUsage(); }
             // this read claimed the newest one: a pick it superseded had put the

@@ -21,6 +21,7 @@ magpie.plugin("routing", (ctx) => {
     title: "Routing",
     html: `
     <div class="row-head"><span class="label" data-t>Routing</span><span class="rt-livedot" aria-hidden="true"></span><span class="note" data-t>live, as the gateway decides</span><span class="grow"></span>
+      <button class="text rt-gogroups" id="rtGoGroups" type="button" data-tt="Go to the routing groups, below the requests"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v9.5M4 8.5l4 4 4-4"/></svg><span data-t>Routing groups</span></button>
       <button class="text rt-newgroup" id="rtNewGroup" type="button" data-feature="groups" data-tt="Make a routing group of any models you like — agents pick it as one model"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9"/></svg><span data-t>New group</span></button>
       <button class="text rt-mask" id="rtMask" aria-pressed="false" data-tt="Mask the accounts on this page — email addresses and account names — for a screenshot to share"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.9 4.2A10.4 10.4 0 0 1 12 4c6.5 0 10 8 10 8a17.6 17.6 0 0 1-2.2 3.2M6.6 6.6C3.9 8.4 2 12 2 12s3.5 8 10 8a9.7 9.7 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2M2 2l20 20"/></svg><span data-t>Hide accounts</span></button></div>
     <section class="rt" id="rt"></section>
@@ -552,6 +553,9 @@ function routingPage(part) {
       case "window": return t("Its allowance is used up: it rests until that renews, at {time}", { time });
       case "resets": return t("It rests until {time}, when the vendor says the limit resets", { time });
       case "quota": return t("It rests 15 minutes: out of quota, with no word of when it resets");
+      // a Codex account that holds credits, refused again once asked
+      // again onto them: not benched until its window renews
+      case "credits": return t("It holds credits, so it rests only {d} and its usage is read again, not until its allowance renews", { d });
       case "verify": return t("The vendor wants the account verified first: it rests half an hour, or until you say it's verified");
       // its provider set never to rest after an unknown failure
       // (`magpie provider rest-cap <id> off`): asked again next time
@@ -632,6 +636,7 @@ function routingPage(part) {
     if (f.kind !== "account" && !f.known) return t("{who} goes first.", { who: w });
     if (f.learns && peers.some((p) => p.known)) return t("{who} goes first: what it has left isn't known yet, and its answer tells — kept behind those known, it would never answer and never be known.", { who: w });
     if (!f.known && !peers.some((p) => p.known)) return t("The vendor hasn't said yet what these accounts have left, so they go in their order: {who} first.", { who: w });
+    if (group(f) === "spent" && f.credits) return t("Every account is all but used up, so {who} goes first: it goes on on its credits, which the vendor spends once its allowance is used up.", { who: w });
     if (group(f) !== "fine") return r.order.some((x) => x.kind !== "account" && x.known)
       ? t("Every key and account here is at 90% or more of its allowance, so the one with the most left goes first: {who}, at {n}.", { who: w, n: pct(f.used) })
       : t("Every account is at 90% or more of its allowance, so the one with the most left goes first: {who}, at {n}.", { who: w, n: pct(f.used) });
@@ -674,6 +679,7 @@ function routingPage(part) {
     for (const x of r.order.slice(1)) {
       if (x.sunk && !x.rest) out.push(t("{who} was rate limited at {time} while it had quota left, so it went to the back: it comes round again once those ahead of it are rate limited in turn.", { who: who(x), time: clock(x.sunk) }));
       else if (x.rest) out.push(t("{who} is resting — {why}, {when} — so it waits at the back.", { who: who(x), why: `${x.rest.status} · ${failWord(x.rest.why)}`, when: restWhen(x.rest, at(r.time)) }));
+      else if (smart(x) && x.known && group(x) === "spent" && x.credits) out.push(t("{who} is at {n} of its allowance but goes on on its credits — ahead of those used up with nothing to go on with, after those with allowance left.", { who: who(x), n: pct(x.used) }));
       else if (smart(x) && x.known && group(x) === "spent") out.push(t("{who} is at {n} — all but used up, it answers only when nothing else can.", { who: who(x), n: pct(x.used) }));
       else if (smart(x) && x.known && group(x) === "low") out.push(t("{who} is at {n} — kept for when the others can't.", { who: who(x), n: pct(x.used) }));
       else if (smart(x) && x.learns && someKnown) out.push(t("{who}: what it has left isn't known yet, and its answer tells, so it goes before those known.", { who: who(x) }));
@@ -999,6 +1005,9 @@ function routingPage(part) {
     // it was spent for is the one that then answered
     const spent = tr.reset && tr.status < 400
       ? t("Its week was used up, so one of {account}'s Codex resets was used by itself first.", { account: userShown(w?.provider, tr.reset.who) }) + " "
+      // Codex's own sign-in asked again onto its credits: the one try
+      : tr.credits && tr.status < 400
+      ? t("Its allowance had just run out and it was refused, so it was asked again at once to spend its credits.") + " "
       : "";
     if (tr.status < 400 && tr.fail)
       return tr.rest
@@ -1014,6 +1023,11 @@ function routingPage(part) {
     if (tr.reset)
       return t("{who} answered {status}: its week is used up and nobody else could take the request, so one of {account}'s Codex resets was used by itself and the request is asked again, before any of the reply reaches {agent}.",
         { who: name, status: tr.status, account: userShown(w?.provider, tr.reset.who), agent });
+    // a Codex account that holds credits, refused as its allowance ran
+    // out: asked again at once, for the vendor to spend its credits
+    if (tr.credits)
+      return t("{who} answered {status}: its allowance had just run out, but the account holds credits, which the vendor spends once the allowance is used up, so it is asked again at once, before any of the reply reaches {agent}.",
+        { who: name, status: tr.status, agent });
     if (tr.fail === "canceled")
       return t("{agent} canceled the request while {who} was answering: nobody failed, so nobody rests and nobody else is asked.", { who: name, agent });
     if (tr.fail === "auth")
@@ -1805,7 +1819,7 @@ function routingPage(part) {
         else if (tr.done && !tr.rest && !tr.again && !tr.earlier && r.done && tr === r.tries[r.tries.length - 1]) gave.set(tryseat(r, tr), tr);
         // one the gateway went on from says what it answered, and that the
         // request went on, not that the agent got it
-        else if (tr.done && !tr.rest && !tr.again && tr !== r.tries[r.tries.length - 1]) went.set(tryseat(r, tr), tr);
+        else if (tr.done && !tr.rest && !tr.again && !tr.credits && tr !== r.tries[r.tries.length - 1]) went.set(tryseat(r, tr), tr);
         if (tr.rest) restAt(tr.id, modelOf(tr), tr.rest);
       }
       // it answered: whatever rest it began in is over
@@ -1824,7 +1838,8 @@ function routingPage(part) {
       else if (w.sunk) s = t("rate limited at {time} · at the back", { time: clock(w.sunk) });
       else if (w.known) {
         const soon = usedRenews(w);
-        s = !w.routing && w.used >= 98 ? quota(w, "{n} used · all but used up", "{n} left · all but used up")
+        s = !w.routing && w.used >= 98 && w.credits ? quota(w, "{n} used · on credits", "{n} left · on credits")
+          : !w.routing && w.used >= 98 ? quota(w, "{n} used · all but used up", "{n} left · all but used up")
           : !w.routing && w.used >= 90 ? quota(w, "{n} used · kept for last", "{n} left · kept for last")
           : soon ? quota(w, "{n} used · renews in {d}", "{n} left · renews in {d}", { d: dur(soon - n) }) : quota(w, "{n} used", "{n} left");
       } else if (w.kind === "account") s = t("what's left not known yet");
@@ -2010,40 +2025,43 @@ function routingPage(part) {
     bodies.replaceChildren(grid);
   }
   // holdStory keeps the story of the live request, its head and its lines,
-  // as tall as the tallest of the last few requests answered, at this
+  // as tall as the tallest of the last few requests told, at this
   // width: a request under way is told in fewer lines than one answered
   // ("is answering…", then "answered in 4.0 s…" over two lines at a
   // phone's width), and its head gets View usage and Replay, taller than
   // the words, once it is done. So each new request moved the context
   // window under it up and back down (dumplings on Discord: the card
-  // jittered on every request). Only the last STORY_HELD answered count: one
+  // jittered on every request). Only the last STORY_HELD told count: one
   // told in many lines (a request handed on from member to member) no
   // longer holds the box that tall for good, and it shrinks back once
   // that many shorter ones have come after it (夜松云 on Discord: the box
-  // grew and never shrank back). A request picked, a replay or a past day
-  // is drawn at its own height. A change of width measures it again at
+  // grew and never shrank back). Each request told counts, answered or
+  // under way, at the height it has now: on a busy gateway a request is
+  // answered as the next starts, the two come in one trace, and the
+  // newest is always under way, so counting only those told answered
+  // held the long one for good (shensmart on Discord, a remote magpie in
+  // a local browser: the room grew with use). A request picked, a replay
+  // or a past day is drawn at its own height. A change of width measures it again at
   // once, as it is then (the list coming in under it can take a
   // scrollbar's width off it before the first live request)
   const STORY_HELD = 3;
-  let storyHold = { key: "", done: new Map() }, storyDrawn = "";
+  let storyHold = { key: "", told: new Map() }, storyDrawn = "";
   function holdStory() {
     const follow = !pinned && !rp && !day;
     const w = steps.clientWidth;
     const key = JSON.stringify([follow, w, document.documentElement.lang]);
     if (key === storyHold.key && storyDrawn === headKey + stepsKey) return;
-    if (key !== storyHold.key) storyHold = { key, done: new Map() };
+    if (key !== storyHold.key) storyHold = { key, told: new Map() };
     storyDrawn = headKey + stepsKey;
     [logHead, steps].forEach((e) => { e.style.minHeight = ""; });
     if (!follow || !w || !logR) return;
     const hs = [logHead, steps].map((e) => e.getBoundingClientRect().height);
-    // an answered request's own height, kept by its id: the last few only
-    if (logR.done) {
-      storyHold.done.set(logR.id, hs);
-      const ids = [...storyHold.done.keys()].sort((x, y) => y - x);
-      for (const id of ids.slice(STORY_HELD)) storyHold.done.delete(id);
-    }
+    // a request's own height as told now, kept by its id: the last few only
+    storyHold.told.set(logR.id, hs);
+    const ids = [...storyHold.told.keys()].sort((x, y) => y - x);
+    for (const id of ids.slice(STORY_HELD)) storyHold.told.delete(id);
     [logHead, steps].forEach((e, i) => {
-      const held = Math.max(0, ...[...storyHold.done.values()].map((h) => h[i]));
+      const held = Math.max(0, ...[...storyHold.told.values()].map((h) => h[i]));
       if (held > hs[i]) e.style.minHeight = held + "px";
     });
   }
@@ -3340,7 +3358,7 @@ function routingPage(part) {
         renderAll();
         dot.classList.add("back", "err");
         back = bird("res");
-        if (!tr.rest && (!tr.again || tr.gone)) { // that was the answer: the agent gets the error, or has gone
+        if (!tr.rest && !tr.credits && (!tr.again || tr.gone)) { // that was the answer: the agent gets the error, or has gone
           await fly(dot, back, home(row, A), 1350);
           flying.delete(dot);
           away(back);
@@ -5852,6 +5870,38 @@ function routingPage(part) {
     if (!groups) await loadGroups();
     if (groups) newGroup(ev);
   };
+  // the head's Routing groups: the groups sit below the stage, the story
+  // and every request, a long scroll down with many models (shihh on
+  // Discord). Its click brings them to the top of the view, and the focus
+  // with them, so Tab goes on from there; the page is laid out as before
+  gsec.tabIndex = -1;
+  const headGo = $("#rtGoGroups");
+  if (headGo) headGo.onclick = (ev) => {
+    if (!window.scrollOnPurpose?.(ev)) return;
+    gsec.scrollIntoView({ block: "start", behavior: still() ? "auto" : "smooth" });
+    gsec.focus({ preventScroll: true });
+  };
+  // fitGo: it takes only room the head has spare, so nothing else in the
+  // head moves or wraps for it: named where its name fits, its arrow alone
+  // where only that does, and left out of a head with no room (a phone's)
+  const goHead = headGo?.parentElement, goGrow = goHead?.querySelector(".grow");
+  function fitGo() {
+    if (!goGrow || !goHead.offsetParent) return;
+    headGo.dataset.fit = "none";
+    const room = goGrow.getBoundingClientRect().width, gap = parseFloat(getComputedStyle(goHead).columnGap) || 0;
+    for (const fit of ["full", "icon"]) {
+      headGo.dataset.fit = fit;
+      if (room >= headGo.getBoundingClientRect().width + 6 + gap) return;
+    }
+    headGo.dataset.fit = "none";
+  }
+  let goFitting = 0;
+  const fitGoSoon = () => { if (!goFitting) goFitting = requestAnimationFrame(() => { goFitting = 0; fitGo(); }); };
+  if (goHead) {
+    const ro = new ResizeObserver(fitGoSoon);
+    for (const n of [goHead, ...goHead.querySelectorAll(".label, .note")]) ro.observe(n);
+    new MutationObserver(fitGoSoon).observe(document.documentElement, { attributes: true, attributeFilter: ["lang"] });
+  }
   const askedGroup = document.body.classList.contains("window") && params.get("newgroup");
   if (askedGroup) loadGroups().then(() => window.newGroupWith(askedGroup, ""));
   else loadGroups();
