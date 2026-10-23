@@ -4144,7 +4144,8 @@ async function renderUpdateBadge() {
   // click, not as "now"
   if (u.state === "ready" && u.waiting) {
     label.textContent = t("Waiting to update");
-    b.title = t("magpie restarts to update to {v} once the agents' requests through the gateway have finished: {busy}. Click to restart now.", { v: u.latest, busy: updateBusyText(u.busy) || "…" });
+    const a = { v: u.latest, busy: updateBusyText(u.busy) || "…" };
+    b.title = u.handover ? t("magpie restarts to update to {v} once the replies through a Claude subscription have finished: {busy}. Other requests carry on across the restart. Click to restart now.", a) : t("magpie restarts to update to {v} once the agents' requests through the gateway have finished: {busy}. Click to restart now.", a);
     b.onclick = () => {
       if (Date.now() - (+b.dataset.armed || 0) < 1500) return;
       b.classList.add("busy");
@@ -19652,9 +19653,7 @@ function renderSettings() {
     ? t("Off: a newer version is only shown, with its size; it downloads when you click Download update. For metered networks and proxies billed by traffic")
     : t("Downloads a newer version as soon as it is found. Turn off on a metered network or a proxy billed by traffic"), "",
     segs([["off", t("Off")], ["on", t("On")]], s.noAutoDownload ? "off" : "on", (v) => savePrefs({ ...keep, noAutoDownload: v === "off" }))).classList.add("update-download-row");
-  // whether a downloaded update is restarted into by itself, once no agent
-  // request is in flight (#2096); off, it waits for Restart or for quitting
-  row(t("Restart automatically"), s.noAutoUpdate ? t("While automatic updates are on") : t("Once an update is downloaded, restarts into it when no agent request is in flight"), "",
+  row(t("Restart automatically"), s.noAutoUpdate ? t("While automatic updates are on") : t("Once an update is downloaded, restarts into it without cutting off an agent's request"), "",
     segs([["off", t("Off")], ["on", t("On")]], s.autoRestart ? "on" : "off", (v) => savePrefs({ ...keep, autoRestart: v === "on" }))).classList.add("update-restart-row", ...(s.noAutoUpdate ? ["off"] : []));
   renderUpdateMirror(row(t("Download source"), "", ""), s);
   const open = el("button", "text", t("Open"));
@@ -23454,7 +23453,7 @@ async function renderUpdate(r, u) {
       };
       const busyNow = updateBusyText(u.busy);
       if (u.waiting) {
-        sub.textContent += " · " + t("restarts once the gateway is idle") + (busyNow ? " · " + busyNow : "");
+        sub.textContent += " · " + (u.handover ? t("restarts once the Claude subscription's replies have finished") : t("restarts once the gateway is idle")) + (busyNow ? " · " + busyNow : "");
         btn(t("Restart now"), () => install("now"));
         btn(t("Cancel"), () => install("cancel"));
         // the wait ends in a restart: a read that finds no one is that
@@ -24146,6 +24145,7 @@ async function show(v) {
       if (on) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
     }
     if (!sideNav()) { slide($("#nav"), "nav"); navInSight(); }
+    else navTopGo($("#nav").querySelector("button[data-view].on"), true);
   }
   $("#prefs").classList.toggle("on", v === "settings");
   if (v === "settings") $("#prefs").setAttribute("aria-current", "page"); else $("#prefs").removeAttribute("aria-current");
@@ -24181,7 +24181,15 @@ function syncURL() {
   const s = q.size ? "?" + q : location.pathname;
   if (s !== location.search) history.replaceState(null, "", s);
 }
-if (mode === "window") for (const b of $("#nav").querySelectorAll("button[data-view]")) b.onclick = () => { show(b.dataset.view); b.blur(); };
+if (mode === "window") for (const b of $("#nav").querySelectorAll("button[data-view]")) {
+  // beside the sidebar the selection goes as the finger comes down, as the
+  // sub-rows' does; let go off the row, or the page kept (a draft not
+  // given up), it goes back
+  b.onpointerdown = (e) => { if (e.button === 0) navTopGo(b, true); };
+  b.onpointercancel = () => navTopGo(navTopOn(), true);
+  b.onpointerleave = (e) => { if (e.buttons & 1) navTopGo(navTopOn(), true); };
+  b.onclick = () => { show(b.dataset.view).then((went) => { if (!went) navTopGo(navTopOn(), true); }); b.blur(); };
+}
 // setGatewayMode shows or leaves out gateway mode's pages' tabs; the page
 // open, one of them, gives way to Providers
 function setGatewayMode(on) {
@@ -24510,6 +24518,7 @@ function layoutNav() {
   navSubs();
   navSubs.quiet = false;
   if (!on) { slide(nav, "nav"); navInSight(); } else { sideGwRead(); renderSideGw(); }
+  navTopGo(navTopOn(), false);
   sideWidth();
   renderSideToggle();
   fitTop();
@@ -24788,6 +24797,86 @@ function navSubGlide(box, row) {
   if (!hl || !row || hl.hidden) return;
   hl.style.transform = `translateY(${row.offsetTop}px)`;
   hl.style.height = row.offsetHeight + "px";
+}
+// The open page's row beside the sidebar is marked by one shape too
+// (.nav-top-hl), which moves to the row picked on a spring, as iOS moves a
+// selection: quick off the mark, settling softly with the least overshoot.
+// Being physics, not a timed curve, it is never thrown: a press that
+// changes its mind turns it with the speed it has, and it follows its row
+// while a list above folds away, landing where the row ends up rather
+// than where it was when the press came.
+var NAV_SPRING = { response: 0.42, damping: 0.84 }; // seconds, fraction: SwiftUI's terms
+var navTop = { row: null, y: 0, h: 0, vy: 0, vh: 0, at: 0, raf: 0, seen: false };
+const navTopOn = () => $("#nav")?.querySelector("button[data-view].on") || null;
+function navTopHl() {
+  const nav = $("#nav");
+  let hl = nav.querySelector(":scope > .nav-top-hl");
+  if (!hl) {
+    hl = el("i", "nav-top-hl");
+    hl.hidden = true;
+    nav.append(hl);
+    // the rows moved at rest (the window, the language, a page left out):
+    // the shape stays on its row
+    new ResizeObserver(() => { if (!navTop.raf && navTop.row && !hl.hidden) navTopPut(hl, navTop.row); }).observe(nav);
+  }
+  return hl;
+}
+function navTopDraw(hl) {
+  hl.style.transform = `translateY(${navTop.y}px)`;
+  hl.style.height = navTop.h + "px";
+}
+function navTopPut(hl, row) {
+  Object.assign(navTop, { y: row.offsetTop, h: row.offsetHeight, vy: 0, vh: 0 });
+  navTopDraw(hl);
+}
+// navTopGo sends the shape to row, still unless glide
+function navTopGo(row, glide) {
+  if (mode !== "window" || !$("#nav")) return;
+  const nav = $("#nav"), hl = navTopHl();
+  const to = sideNav() && row && !row.hidden && row.offsetParent ? row : null;
+  nav.classList.toggle("hl-on", !!to);
+  // the same row, the shape still: the rows moved under it, not a pick, so
+  // it stays on its row. And one not on screen yet (the window opening on
+  // the page it was left on) is put there, not sent
+  if (to && ((to === navTop.row && !navTop.raf) || !navTop.seen)) glide = false;
+  navTop.row = to;
+  if (!to) { cancelAnimationFrame(navTop.raf); navTop.raf = 0; hl.hidden = true; return; }
+  const appearing = hl.hidden;
+  hl.hidden = false;
+  if (!navTop.seen) requestAnimationFrame(() => requestAnimationFrame(() => { navTop.seen = !hl.hidden; }));
+  if (appearing || !glide || navCalm()) {
+    cancelAnimationFrame(navTop.raf);
+    navTop.raf = 0;
+    navTopPut(hl, to);
+    // back from Settings, whose row is at the foot: it comes up in place
+    if (appearing && glide && !navCalm()) hl.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 240, easing: NAV_EASE });
+    return;
+  }
+  if (!navTop.raf) { navTop.at = performance.now(); navTop.raf = requestAnimationFrame(navTopStep); }
+}
+function navTopStep(now) {
+  const nav = $("#nav"), hl = nav?.querySelector(":scope > .nav-top-hl"), row = navTop.row;
+  if (!hl || !row?.isConnected) { navTop.raf = 0; return; }
+  const dt = Math.min(1 / 30, Math.max(0, (now - navTop.at) / 1000));
+  navTop.at = now;
+  const k = (2 * Math.PI / NAV_SPRING.response) ** 2, c = 4 * Math.PI * NAV_SPRING.damping / NAV_SPRING.response;
+  const ty = row.offsetTop, th = row.offsetHeight;
+  // a few small steps a frame keep the spring true at any frame rate
+  for (let i = 0, d = dt / 4; i < 4; i++) {
+    navTop.vy += (k * (ty - navTop.y) - c * navTop.vy) * d;
+    navTop.y += navTop.vy * d;
+    navTop.vh += (k * (th - navTop.h) - c * navTop.vh) * d;
+    navTop.h += navTop.vh * d;
+  }
+  const still = Math.abs(ty - navTop.y) < 0.25 && Math.abs(navTop.vy) < 4 && Math.abs(th - navTop.h) < 0.25 && Math.abs(navTop.vh) < 4;
+  // at rest once there, and nothing above it still folding
+  if (still && !nav.querySelector(".nav-sub.moving, .nav-sub.leaving")) {
+    navTopPut(hl, row);
+    navTop.raf = 0;
+    return;
+  }
+  navTopDraw(hl);
+  navTop.raf = requestAnimationFrame(navTopStep);
 }
 function navSubEnter(box) {
   if (navCalm()) return;
