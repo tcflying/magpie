@@ -55,10 +55,10 @@ go run github.com/tc-hib/go-winres@v0.3.3 make --in build/windows/winres.json --
 
 ### 2) 构建
 
-在**仓库根目录**里跑（先 `cd` 到仓库根）。产物直接写到 `ops/yellow-20261023/artifacts/`，目录没有就建一个：
+在**仓库根目录**里跑（先 `cd` 到仓库根）。产物直接写到 `ops/yellow-update-20261023-2210/artifacts/`，目录没有就建一个：
 
 ```powershell
-$out = 'ops\yellow-20261023\artifacts'
+$out = 'ops\yellow-update-20261023-2210\artifacts'
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
 $envs = 'CGO_ENABLED','GOOS','GOARCH'
@@ -80,7 +80,7 @@ try {
 
 几点：
 
-- **产物是 `ops\yellow-20261023\artifacts\magpie-yellow.exe`**（官方上游那份叫 `magpie.exe`，别混了）。`ops/` 整个目录被 `.gitignore` 挡着，不会进 Git。
+- **产物是 `ops\yellow-update-20261023-2210\artifacts\magpie-yellow.exe`**（官方上游那份叫 `magpie.exe`，别混了）。`ops/` 整个目录被 `.gitignore` 挡着，不会进 Git。
 - **三个环境变量只是临时改一下**，`finally` 里照原样还原：原来没有的还删掉，不动你 shell 里原本的设置。
 
 Go 自己的缓存和临时文件默认落在 C 盘（`%LOCALAPPDATA%\go-build`、`%USERPROFILE%\go\pkg\mod`）。要把开发环境整体放 D 盘，就在**构建前**先指到 D 盘（路径换成你自己的）：
@@ -94,11 +94,11 @@ New-Item -ItemType Directory -Force -Path D:\go-cache\build,D:\go-cache\mod,D:\g
 
 **版本串是防自动更新的关键**，别改：
 
-- `--long` 让 `git describe` 一定带上「离上一个 tag 几个提交 + 提交号」，哪怕 HEAD 正好落在 tag 上，也是 `v0.1.1327-0-g6d812fc3` 这种形式。少了 `--long`，在 tag 上构建只会得到 `v0.1.1327`，程序就会当成正式发布版。
+- `--long` 让 `git describe` 一定带上「离上一个 tag 几个提交 + 提交号」，哪怕 HEAD 正好落在 tag 上，也是 `v0.1.1343-0-gc759a7c1` 这种形式。少了 `--long`，在 tag 上构建只会得到 `v0.1.1343`，程序就会当成正式发布版。
 - 程序判断「是不是正式发布版」看的就是这一段：`internal/update/update.go` 的 `Released()`。版本里带 `-<数字>-g<提交号>`（或者 `-dirty`），它就认定这不是发布版，官方更新不会来替换它。
 - `+yellow` 只是给这个构建打标记。`+` 后面是构建元信息，程序读版本时不算它（`parse()` 会先把它切掉）。
 
-所以版本串长这样：`v0.1.1327-5-g6d812fc3+yellow`；工作区有改动时是 `v0.1.1327-5-g6d812fc3-dirty+yellow`。
+所以版本串长这样：`v0.1.1343-11-gc759a7c1+yellow`；工作区有改动时是 `v0.1.1343-11-gc759a7c1-dirty+yellow`。
 
 两个容易踩的坑：
 
@@ -184,8 +184,8 @@ Windows 任务栏上的图标取的是**窗口自己的图标**（`WM_SETICON`�
 ```powershell
 $sh = New-Object -ComObject WScript.Shell
 $lnk = $sh.CreateShortcut("$env:USERPROFILE\Desktop\Magpie.lnk")
-$lnk.TargetPath       = 'D:\mmx-project\magpie\ops\yellow-20261023\artifacts\magpie-yellow.exe'
-$lnk.WorkingDirectory = 'D:\mmx-project\magpie\ops\yellow-20261023\artifacts'
+$lnk.TargetPath       = 'D:\mmx-project\magpie\ops\yellow-update-20261023-2210\artifacts\magpie-yellow.exe'
+$lnk.WorkingDirectory = 'D:\mmx-project\magpie\ops\yellow-update-20261023-2210\artifacts'
 $lnk.IconLocation     = "$env:LOCALAPPDATA\Magpie\magpie-yellow.ico,0"
 $lnk.Save()
 ```
@@ -336,11 +336,11 @@ node --test --test-concurrency=1 internal/gui/tests/logo-mark.test.cjs
 | Wails 版本 | 从上游的 `v3.0.0-beta.24` 升到 `v3.0.0-beta.34`，顺带修好了 Windows 托盘右键菜单（第七节） |
 | 文档 | 这份教程，和 README 顶部的 fork 说明 |
 
-这个 fork 的历史在 2026-10-23 重建在上游 commit `398803e3` 之上（当天上游 main 的位置）。想看它相对上游到底改了什么，在自己的 clone 里跑：
+这个 fork 的历史在 2026-10-23 重建，并在上游发布 tag `v0.1.1343` 之上合并了上游（合并提交 `c759a7c1`）。想看它相对上游到底改了什么，在自己的 clone 里跑：
 
 ```powershell
-git log --oneline 398803e3..HEAD
-git diff --stat 398803e3..HEAD
+git log --oneline v0.1.1343..HEAD
+git diff --stat v0.1.1343..HEAD
 ```
 
 上游自己会往前走，所以这里不写「领先几个、落后几个」这种会过期的数字。

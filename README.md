@@ -10,15 +10,15 @@
 > - **The Windows tray's icon fills its cell.** The disc bleeds to the edges of the notification area at every size Windows asks for (16/20/24/28/32/36/40/48/64), so it measures 20x20 physical pixels beside the other icons, where it measured 18x18.
 > - **The Windows tray's right-click menu opens.** Upstream builds against Wails v3.0.0-beta.24, whose tray window procedure only handles `WM_RBUTTONUP`; but the tray icon uses `NOTIFYICON_VERSION_4`, under which the right click arrives as `WM_CONTEXTMENU`, so the menu never opened. This fork builds against Wails v3.0.0-beta.34, which carries upstream's fix ([wailsapp/wails#6162](https://github.com/wailsapp/wails/pull/6162)), so right-clicking the tray icon gives "open magpie / version / quit magpie".
 > - **A Chinese tutorial for the yellow disc on Windows.** See [`docs/tutorial.zh-CN.md`](docs/tutorial.zh-CN.md).
-> - **Platforms.** The Windows build of this fork is built locally (`ops/yellow-20261023/artifacts/magpie-yellow.exe`). The macOS app's `Assets.car` can only be rebuilt on macOS, so the Dock icon there is not guaranteed to carry the yellow disc.
+> - **Platforms.** The Windows build of this fork is built locally (`ops/yellow-update-20261023-2210/artifacts/magpie-yellow.exe`). The macOS app's `Assets.car` can only be rebuilt on macOS, so the Dock icon there is not guaranteed to carry the yellow disc.
 >
 > **Keep the fork's build, not the official one.** A build made from this fork's source carries git describe's `-<n>-g<commit>` and a `+yellow` suffix, so the app reads it as not a released build and doesn't turn itself into the official one. The official release is built from upstream, so it carries the bird, not the yellow disc: don't overwrite this build with an official one by hand, take new versions from this fork's source instead. The download and install commands further down this page are upstream's own and install the official build — to run this fork on Windows, build it from source as the tutorial shows.
 >
-> This fork's history was rebuilt on 2026-10-23 on top of upstream commit `398803e3`, the upstream main it was based on that day. Upstream can move on independently, so no "ahead N, behind M" count is written down here on purpose. In your own clone, run these to see what this fork changed:
+> This fork's history was rebuilt on 2026-10-23 and upstream's release `v0.1.1343` was merged into it (the merge commit is `c759a7c1`). Upstream can move on independently, so no "ahead N, behind M" count is written down here on purpose. In your own clone, run these to see what this fork changed:
 >
 > ```sh
-> git log --oneline 398803e3..HEAD
-> git diff --stat 398803e3..HEAD
+> git log --oneline v0.1.1343..HEAD
+> git diff --stat v0.1.1343..HEAD
 > ```
 >
 > No pull request has been sent upstream; this fork never pushes to `yetone/magpie`.
