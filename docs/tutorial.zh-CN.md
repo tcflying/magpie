@@ -129,6 +129,41 @@ del rsrc_windows_amd64.syso
 
 设置文件在 `~/.config/magpie`（Windows 上就是 `C:\Users\<你的用户名>\.config\magpie`）；便携版则放在 exe 旁边的 `data\` 目录里（放一个 `.portable` 文件在旁边也算便携）。
 
+### 想要在终端里敲命令？再编一个控制台版
+
+上面第二步的 `-H windowsgui` 会让 exe 变成 **GUI subsystem** 的程序：双击没有黑框，这是对的，
+但代价是它在终端里**一句输出都没有**。
+
+```powershell
+D:\path\to\magpie-yellow.exe --version     # 什么都没有，退出码却是 0
+D:\path\to\magpie-yellow.exe ls            # 同样什么都没有
+```
+
+不是程序挂了，是 Windows GUI subsystem 的进程默认**不继承标准句柄**（`GetStdHandle` 返回
+NULL），magpie 里也没有 `AttachConsole` 那段代码，所以 `fmt.Println` 全部写不进去。
+第六节说的 `magpie quota`、`magpie tui` 这些命令，在这个构建上是用不了的。
+
+所以再编一个**控制台版**，它不带 GUI 代码，体积也小：
+
+```powershell
+$env:CGO_ENABLED='0'; $env:GOOS='windows'; $env:GOARCH='amd64'
+go build -tags nogui -trimpath -ldflags="-s -w -X main.version=$ver" -o "$out\magpie-yellow-cli.exe" .
+```
+
+于是：
+
+| 文件 | 是什么 | 怎么用 |
+| :-- | :-- | :-- |
+| `magpie-yellow.exe` | 桌面应用（GUI subsystem） | 桌面快捷方式、托盘、窗口 |
+| `magpie-yellow-cli.exe` | 控制台 CLI（console subsystem） | 终端里敲 `magpie-yellow-cli.exe ls` / `quota` / `tui` |
+
+注意两件事：
+
+- 两个 exe 的版本戳要一致（`-X main.version=$ver` 用同一个 `$ver`），这样
+  `magpie-yellow-cli.exe --version` 和 `/api/hello` 回的版本才对得上。
+- `-tags nogui` 会把 GUI 代码整个剔掉，所以它不占端口、不上托盘，只是个命令行工具。
+  两个 exe 别同时跑着抢 3425 端口。
+
 ---
 
 ## 三、桌面快捷方式（Windows 上最需要手做的一步）
@@ -235,8 +270,8 @@ foreach ($s in 16,32,48,64,128,256) { go run build/icon/gen.go app $s "build/win
 - **给每个 Agent 选模型**：Agents 页，每行一个 Agent。
 - **路由组**：让 Agent 把一组模型当作一个模型来选，额度用完自动切到下一个账号或模型。
 - **方案（Profile）**：把所有 Agent 的配置存成一个名字（比如「省钱」「专注」），一键全部切回去。
-- **看额度**：`magpie quota`。
-- **全终端**：`magpie tui`。
+- **看额度**：`magpie-yellow-cli.exe quota`（控制台版才有输出，见第二节末尾那节）。
+- **全终端**：`magpie-yellow-cli.exe tui`（同上）。
 - **菜单栏显示用量和花费**：设置 → 「菜单栏显示额度」选要显示的订阅，「菜单栏金额」控制要不要连花费一起显示。
 
 ---
@@ -255,13 +290,20 @@ foreach ($s in 16,32,48,64,128,256) { go run build/icon/gen.go app $s "build/win
 
 本 fork 已经修好了（第四节）。如果你改了品牌源，或者把 `build/icon/gen.go` 里的 `trayWindowsFill` 调小，`TestTrayWindowsIconSizes` 会红。
 
-### Windows 托盘右键菜单打不开
+### Windows 托盘右键菜单打不开（已修）
 
-这是上游 Wails v3 的已知问题，不是这个 fork 引入的。
+这是上游 Wails v3 的问题，不是这个 fork 引入的。**本 fork 已通过升级 Wails 修掉。**
 
-Wails v3 beta.24 的 `pkg/application/systemtray_windows.go` 的窗口过程只处理 `WM_RBUTTONUP`，但它的托盘图标用的是 `NOTIFYICON_VERSION_4`——在这个版本下右键是以 `WM_CONTEXTMENU` 送到的，于是右键处理器根本不触发，菜单打不开。
+原因：Wails v3 beta.24 的 `pkg/application/systemtray_windows.go` 的窗口过程只处理 `WM_RBUTTONUP`，
+但它的托盘图标用的是 `NOTIFYICON_VERSION_4`——在这个版本下右键是以 `WM_CONTEXTMENU` 送到的，
+于是右键处理器根本不触发，菜单打不开。
 
-上游 PR [wailsapp/wails#6162](https://github.com/wailsapp/wails/pull/6162) 修了这个问题（2026-10-15 合入 master），**v3.0.0-beta.34 起包含这个修复**。本 fork 用的还是 beta.24，**没有为此升级 Wails**，所以这个现象还在。
+上游 PR [wailsapp/wails#6162](https://github.com/wailsapp/wails/pull/6162) 修了这个问题
+（2026-10-15 合入 master），**v3.0.0-beta.34 起包含这个修复**。本 fork 的 `go.mod` 现在是
+`github.com/wailsapp/wails/v3 v3.0.0-beta.34`，所以托盘图标右键能出菜单了
+（打开 magpie / 版本 / 退出 magpie 三项）。
+
+升级 Wails 跨了十个 beta，两个构建（`production` 和 `nogui`）都实测能过。
 
 ### 改完图标没变化
 
@@ -291,6 +333,7 @@ node --test --test-concurrency=1 internal/gui/tests/logo-mark.test.cjs
 | 标记换成纯色圆盘 | 顶栏 logo、favicon、应用图标、登录页标记、Agents 列表里 magpie 自己的图标、站点 logo、Omarchy 小组件图形 |
 | 圆盘的颜色 | 品牌黄 `#FACC15`（暗色 `#FDE047`）。这个 fork 最早做的是绿圆，改成黄圆是之后的普通后续修改，绿圆那一版还在历史里 |
 | Windows 托盘图标 | 改成多尺寸 ICO，九档尺寸，和旁边的图标一样大（第四节） |
+| Wails 版本 | 从上游的 `v3.0.0-beta.24` 升到 `v3.0.0-beta.34`，顺带修好了 Windows 托盘右键菜单（第七节） |
 | 文档 | 这份教程，和 README 顶部的 fork 说明 |
 
 这个 fork 的历史在 2026-10-23 重建在上游 commit `398803e3` 之上（当天上游 main 的位置）。想看它相对上游到底改了什么，在自己的 clone 里跑：
