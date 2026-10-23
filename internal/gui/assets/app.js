@@ -24398,14 +24398,12 @@ if (mode !== "window" || !document.body.classList.contains("linux")) $("#winclos
 
 // Config files may change underneath us (another magpie, an editor); reload when
 // the panel comes back into view.
-// The mark in the corner breathes as the window opens and when the pointer
-// comes over it.
+// The mark breathes as the window opens and on hover.
 function wag() {
   const logo = document.querySelector(".brand .logo");
   if (!logo || logo.classList.contains("wag") || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   logo.classList.add("wag");
-  // the breath runs on the disc inside the mark, and its end comes up to the
-  // mark: the mark is what carries the class, so it is what drops it
+  // the disc's breath ends at the mark, which holds the class, so it drops it
   logo.addEventListener("animationend", () => logo.classList.remove("wag"), { once: true });
 }
 document.querySelector(".brand")?.addEventListener("mouseenter", wag);
