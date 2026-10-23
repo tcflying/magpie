@@ -150,6 +150,10 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
       const context = await browser.newContext({ viewport: { width: 860, height: 700 }, colorScheme: theme });
       const page = await context.newPage();
       page.setDefaultTimeout(5000);
+      // the page's own script is a megabyte and the suite runs many pages at
+      // once, so the navigation gets the room Playwright gives it by default
+      // (30s) and only the waits and the assertions keep the 5s
+      page.setDefaultNavigationTimeout(30000);
       const errors = [];
       page.on("pageerror", (e) => errors.push(e.message));
       await page.route("**/*", serve(theme));
@@ -231,6 +235,7 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
     const context = await browser.newContext({ viewport: { width: 860, height: 700 } });
     const page = await context.newPage();
     page.setDefaultTimeout(5000);
+    page.setDefaultNavigationTimeout(30000);
     await page.route("**/*", serve("light"));
     await page.goto("http://magpie.test/");
     await page.waitForSelector("#nav button.on");

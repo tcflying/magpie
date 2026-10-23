@@ -11,9 +11,11 @@ import (
 	"testing"
 )
 
-// A right-click on KDE opens the tray's menu, and Wails calls the click
-// handler from the menu's "opened" event; that call must not open the
+// A right-click on KDE opens the tray's menu, which must not open the
 // panel, while the icon's own click (Activate) still does (#1430).
+// Wails beta.34 does not call the click handler for the menu's opening
+// at all, so the guard is a net for a Wails that does; it tells the
+// menu's opening from the icon's click by the call stack.
 func TestTrayMenuOpeningIsNoClick(t *testing.T) {
 	const app = "github.com/wailsapp/wails/v3/pkg/application."
 	opened := []string{
@@ -41,11 +43,13 @@ func TestTrayMenuOpeningIsNoClick(t *testing.T) {
 	}
 }
 
-// The frame menuOpening looks for is the Wails function Linux's tray host
-// calls when it opens the icon's menu; an upgrade that renames it fails
-// here. That function must also leave the click handler alone: Wails
-// beta.34 sends the menu opening to onMenuOpen and calls the click handler
-// from Activate alone, so a right-click does not open the panel (#1430).
+// The frame menuOpening looks for is the Wails function that calls the
+// click handler when the tray host opens the icon's menu. Wails beta.34
+// (wailsapp/wails#6162) stopped calling the handler there: the "opened"
+// event only calls onMenuOpen, so the menu's opening never reaches the
+// handler and the panel opens for the icon's own click alone. The frame
+// stays the one to look for, for a Wails that calls the handler there
+// again.
 func TestTrayMenuOpenFrameIsWails(t *testing.T) {
 	if !strings.HasSuffix(menuOpenFrame, "(*linuxSystemTray).Event") {
 		t.Fatalf("menuOpenFrame %q no longer names Wails' linux tray Event", menuOpenFrame)

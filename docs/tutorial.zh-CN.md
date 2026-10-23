@@ -94,11 +94,11 @@ New-Item -ItemType Directory -Force -Path D:\go-cache\build,D:\go-cache\mod,D:\g
 
 **版本串是防自动更新的关键**，别改：
 
-- `--long` 让 `git describe` 一定带上「离上一个 tag 几个提交 + 提交号」，哪怕 HEAD 正好落在 tag 上，也是 `v0.1.1347-0-g<提交号>` 这种形式。少了 `--long`，在 tag 上构建只会得到 `v0.1.1347`，程序就会当成正式发布版。
+- `--long` 让 `git describe` 一定带上「离上一个 tag 几个提交 + 提交号」，哪怕 HEAD 正好落在 tag 上，也是 `v0.1.1352-0-g<提交号>` 这种形式。少了 `--long`，在 tag 上构建只会得到 `v0.1.1352`，程序就会当成正式发布版。
 - 程序判断「是不是正式发布版」看的就是这一段：`internal/update/update.go` 的 `Released()`。版本里带 `-<数字>-g<提交号>`（或者 `-dirty`），它就认定这不是发布版，官方更新不会来替换它。
 - `+yellow` 只是给这个构建打标记。`+` 后面是构建元信息，程序读版本时不算它（`parse()` 会先把它切掉）。
 
-所以版本串长这样：`v0.1.1347-<提交数>-g<提交号>+yellow`；工作区有改动时是 `v0.1.1347-<提交数>-g<提交号>-dirty+yellow`。`<提交数>` 是离上游 tag `v0.1.1347` 的提交数，`<提交号>` 是 HEAD 的短 sha——这两个数每次提交都会变，所以别把它们写死在文档里。
+所以版本串长这样：`v0.1.1352-<提交数>-g<提交号>+yellow`；工作区有改动时是 `v0.1.1352-<提交数>-g<提交号>-dirty+yellow`。`<提交数>` 是离上游 tag `v0.1.1352` 的提交数，`<提交号>` 是 HEAD 的短 sha——这两个数每次提交都会变，所以别把它们写死在文档里。
 
 两个容易踩的坑：
 
@@ -336,11 +336,11 @@ node --test --test-concurrency=1 internal/gui/tests/logo-mark.test.cjs
 | Wails 版本 | 从上游的 `v3.0.0-beta.24` 升到 `v3.0.0-beta.34`，顺带修好了 Windows 托盘右键菜单（第七节） |
 | 文档 | 这份教程，和 README 顶部的 fork 说明 |
 
-这个 fork 的历史在 2026-10-23 重建，并合并了上游发布 tag `v0.1.1347`（合并提交 `4554e21e`）；它对应的上游 commit 是 `fa22bc64676e230a71b45a40e7fee2ca750bb4dd`，当天上游 main 的位置。想看它相对上游到底改了什么，在自己的 clone 里跑：
+这个 fork 的历史在 2026-10-24 重建在上游 commit `84341795` 之上（当天上游 main 的位置）。想看它相对上游到底改了什么，在自己的 clone 里跑：
 
 ```powershell
-git log --oneline fa22bc64676e230a71b45a40e7fee2ca750bb4dd..HEAD
-git diff --stat fa22bc64676e230a71b45a40e7fee2ca750bb4dd..HEAD
+git log --oneline 84341795..HEAD
+git diff --stat 84341795..HEAD
 ```
 
 上游自己会往前走，所以这里不写「领先几个、落后几个」这种会过期的数字。
