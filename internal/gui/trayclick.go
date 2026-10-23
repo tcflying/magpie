@@ -12,11 +12,20 @@ import (
 // "opened" event). KDE Plasma opens the menu on a right-click, so a click
 // counted there opened the quick panel too, which took the focus and shut
 // the menu on Wayland at once (#1430).
+//
+// Wails beta.34 (wailsapp/wails#6162) stopped calling the click handler
+// there: the "opened" event only calls onMenuOpen now, so the menu's
+// opening does not reach the handler at all. The frame stays the one to
+// look for, for a Wails that calls the handler there again.
 const menuOpenFrame = "pkg/application.(*linuxSystemTray).Event"
 
 // menuOpening says the click handler was called because the tray's menu is
 // opening, not because the icon was clicked: Wails calls the same handler
 // for both, and only the call stack tells them apart.
+//
+// Under beta.34 the handler is called for the icon's click alone (the
+// tray's Activate), so this is false for every call and the panel opens;
+// it stays for a Wails that calls the handler on the menu's opening again.
 func menuOpening() bool {
 	pcs := make([]uintptr, 32)
 	n := runtime.Callers(2, pcs)

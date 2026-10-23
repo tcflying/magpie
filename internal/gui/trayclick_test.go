@@ -10,9 +10,11 @@ import (
 	"testing"
 )
 
-// A right-click on KDE opens the tray's menu, and Wails calls the click
-// handler from the menu's "opened" event; that call must not open the
+// A right-click on KDE opens the tray's menu, which must not open the
 // panel, while the icon's own click (Activate) still does (#1430).
+// Wails beta.34 does not call the click handler for the menu's opening
+// at all, so the guard is a net for a Wails that does; it tells the
+// menu's opening from the icon's click by the call stack.
 func TestTrayMenuOpeningIsNoClick(t *testing.T) {
 	const app = "github.com/wailsapp/wails/v3/pkg/application."
 	opened := []string{
@@ -41,8 +43,12 @@ func TestTrayMenuOpeningIsNoClick(t *testing.T) {
 }
 
 // The frame menuOpening looks for is the Wails function that calls the
-// click handler on the menu's "opened" event; an upgrade that renames it
-// or stops calling the handler there fails here.
+// click handler when the tray host opens the icon's menu. Wails beta.34
+// (wailsapp/wails#6162) stopped calling the handler there: the "opened"
+// event only calls onMenuOpen, so the menu's opening never reaches the
+// handler and the panel opens for the icon's own click alone. The frame
+// stays the one to look for, for a Wails that calls the handler there
+// again.
 func TestTrayMenuOpenFrameIsWails(t *testing.T) {
 	// go list -m names no folder for a module not yet unpacked, as on CI;
 	// go mod download unpacks it and names its folder
@@ -62,8 +68,15 @@ func TestTrayMenuOpenFrameIsWails(t *testing.T) {
 	if fn == nil {
 		t.Fatalf("Wails has no (*linuxSystemTray).Event; menuOpenFrame %q is stale", menuOpenFrame)
 	}
-	if !regexp.MustCompile(`(?s)case "opened":\s*if s\.parent\.clickHandler != nil \{\s*s\.parent\.clickHandler\(\)`).Match(fn) {
-		t.Fatalf("Wails' Event no longer calls the click handler on \"opened\"; see menuOpening:\n%s", fn)
+	opened := regexp.MustCompile(`(?s)case "opened":(.*?)case "closed":`).FindSubmatch(fn)
+	if opened == nil {
+		t.Fatalf("Wails' Event has no \"opened\" case before its \"closed\" one; menuOpening cannot tell the menu from the click:\n%s", fn)
+	}
+	if !regexp.MustCompile(`s\.parent\.onMenuOpen != nil \{\s*s\.parent\.onMenuOpen\(\)`).Match(opened[1]) {
+		t.Fatalf("Wails' Event does not tell the menu's owner that the menu opened:\n%s", fn)
+	}
+	if regexp.MustCompile(`s\.parent\.clickHandler`).Match(opened[1]) {
+		t.Fatalf("Wails' Event calls the click handler on \"opened\" again; menuOpening catches that call, so the panel stays shut, but the shape changed:\n%s", fn)
 	}
 }
 
