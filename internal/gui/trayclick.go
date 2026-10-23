@@ -7,16 +7,18 @@ import (
 	"unsafe"
 )
 
-// menuOpenFrame is the Wails function that tells the tray's click handler
-// when Linux's tray host opens the icon's menu (com.canonical.dbusmenu's
-// "opened" event). KDE Plasma opens the menu on a right-click, so a click
-// counted there opened the quick panel too, which took the focus and shut
-// the menu on Wayland at once (#1430).
+// menuOpenFrame is the Wails function Linux's tray host calls when it
+// opens the icon's menu (com.canonical.dbusmenu's "opened" event). Wails
+// beta.24 called the tray's click handler from there as well, so a KDE
+// right-click opened the quick panel too, which took the focus and shut the
+// menu on Wayland at once (#1430). Wails beta.34 leaves the click handler
+// to Activate alone, so the check below is a net for older Wails and other
+// hosts, not the everyday path.
 const menuOpenFrame = "pkg/application.(*linuxSystemTray).Event"
 
 // menuOpening says the click handler was called because the tray's menu is
-// opening, not because the icon was clicked: Wails calls the same handler
-// for both, and only the call stack tells them apart.
+// opening, not because the icon was clicked: only the call stack tells them
+// apart.
 func menuOpening() bool {
 	pcs := make([]uintptr, 32)
 	n := runtime.Callers(2, pcs)

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -40,10 +41,15 @@ func TestTrayMenuOpeningIsNoClick(t *testing.T) {
 	}
 }
 
-// The frame menuOpening looks for is the Wails function that calls the
-// click handler on the menu's "opened" event; an upgrade that renames it
-// or stops calling the handler there fails here.
+// The frame menuOpening looks for is the Wails function Linux's tray host
+// calls when it opens the icon's menu; an upgrade that renames it fails
+// here. That function must also leave the click handler alone: Wails
+// beta.34 sends the menu opening to onMenuOpen and calls the click handler
+// from Activate alone, so a right-click does not open the panel (#1430).
 func TestTrayMenuOpenFrameIsWails(t *testing.T) {
+	if !strings.HasSuffix(menuOpenFrame, "(*linuxSystemTray).Event") {
+		t.Fatalf("menuOpenFrame %q no longer names Wails' linux tray Event", menuOpenFrame)
+	}
 	// go list -m names no folder for a module not yet unpacked, as on CI;
 	// go mod download unpacks it and names its folder
 	out, err := exec.Command("go", "mod", "download", "-json", "github.com/wailsapp/wails/v3").Output()
@@ -62,8 +68,21 @@ func TestTrayMenuOpenFrameIsWails(t *testing.T) {
 	if fn == nil {
 		t.Fatalf("Wails has no (*linuxSystemTray).Event; menuOpenFrame %q is stale", menuOpenFrame)
 	}
-	if !regexp.MustCompile(`(?s)case "opened":\s*if s\.parent\.clickHandler != nil \{\s*s\.parent\.clickHandler\(\)`).Match(fn) {
-		t.Fatalf("Wails' Event no longer calls the click handler on \"opened\"; see menuOpening:\n%s", fn)
+	// The "opened" case on its own: from the case label to the next case or
+	// the end of the function.
+	opened := regexp.MustCompile(`(?s)case "opened":(.*?)(?:\n\tcase "|\n\}\n)`).FindStringSubmatch(string(fn))
+	if opened == nil {
+		t.Fatalf("Wails' Event has no \"opened\" case; see menuOpening:\n%s", fn)
+	}
+	// The menu must open: a case that does nothing would pass the check
+	// below on an empty branch.
+	if !strings.Contains(opened[1], "onMenuOpen()") {
+		t.Fatalf("Wails' \"opened\" case does not open the menu; see menuOpening:\n%s", fn)
+	}
+	// And it must not count as a click: that is what made a right-click open
+	// the panel on KDE (#1430).
+	if strings.Contains(opened[1], "clickHandler") {
+		t.Fatalf("Wails' \"opened\" case calls the click handler; a right-click would open the panel too; see menuOpening:\n%s", fn)
 	}
 }
 
