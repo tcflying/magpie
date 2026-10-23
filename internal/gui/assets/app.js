@@ -24386,8 +24386,7 @@ function wag() {
   const logo = document.querySelector(".brand .logo");
   if (!logo || logo.classList.contains("wag") || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   logo.classList.add("wag");
-  // the breath runs on the disc inside the mark, and its end comes up to the
-  // mark: the mark is what carries the class, so it is what drops it
+  // the disc's end bubbles to the mark
   logo.addEventListener("animationend", () => logo.classList.remove("wag"), { once: true });
 }
 document.querySelector(".brand")?.addEventListener("mouseenter", wag);
