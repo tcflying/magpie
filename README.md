@@ -14,11 +14,11 @@
 >
 > **Keep the fork's build, not the official one.** A build made from this fork's source carries git describe's `-<n>-g<commit>` and a `+yellow` suffix, so the app reads it as not a released build and doesn't turn itself into the official one. The official release is built from upstream, so it carries the bird, not the yellow disc: don't overwrite this build with an official one by hand, take new versions from this fork's source instead. The download and install commands further down this page are upstream's own and install the official build — to run this fork on Windows, build it from source as the tutorial shows.
 >
-> This fork's history was merged with upstream on 2026-10-24, up to upstream commit `a3b45eb9` (upstream tag `v0.1.1363`), which is kept as an ancestor of this fork's `main`. Upstream can move on independently, so no "ahead N, behind M" count is written down here on purpose. In your own clone, run these to see what this fork changed:
+> This fork's history was merged with upstream on 2026-10-24, up to upstream commit `dd1e8822` (upstream tag `v0.1.1364`), which is kept as an ancestor of this fork's `main`. Upstream can move on independently, so no "ahead N, behind M" count is written down here on purpose. In your own clone, run these to see what this fork changed:
 >
 > ```sh
-> git log --oneline a3b45eb9..HEAD
-> git diff --stat a3b45eb9..HEAD
+> git log --oneline dd1e8822..HEAD
+> git diff --stat dd1e8822..HEAD
 > ```
 >
 > No pull request has been sent upstream; this fork never pushes to `yetone/magpie`.
