@@ -67,7 +67,6 @@ let showAllAgents = false; // the agents no one has set anything on, folded away
 let showHiddenAgents = false; // under them, the ones hidden by hand: a fold of their own, shut until asked
 let period = "today"; // usage window
 let usage = null;   // last usage summary
-let usageHidOpen = false; // the Usage page's hidden agents shown under their line
 let pick = null; // { agent, field, options, items, cursor, anchor }
 let editing = null; // provider id being edited; { preset } or { custom: true } for a new one
 let draft = null; // the editor's working copy
@@ -138,6 +137,7 @@ async function api(path, body, heads, signal) {
       err.message = t("None of magpie's models is left in {agent}'s model list: pick one under Model list → Pick, then connect {agent}", { agent: data.agent });
     }
     if (data?.why) err.why = data.why; // a failed move's reason, said in the reader's language
+    if (data?.code === "bun_unstartable") err.message = t(data.said); // bunSaid in api.go: an i18n.js key
     // an account the agent is signed in to, refused removal while it has
     // another: said in the reader's language
     if (data?.code === "signed_in") {
@@ -388,6 +388,7 @@ function renderAgentsLoading() {
 let agentArranging = false, agentRenderPending = false;
 function renderAgents() {
   renderCodexMemories(); // the Codex sheet's row is the same field
+  renderCodexSubagentModel(); // and this one
   if (agentArranging) { agentRenderPending = true; return; }
   if (unhideCleared()) return; // it renders again with the hiding dropped
   const page = $("#view-agents");
@@ -422,7 +423,7 @@ function renderAgents() {
     // user's own)
     // nor Aside's account with one account only (#1499)
     const none = (f) => (f.key === "effort" || f.key === "ultracode" || f.label === "subagents" || f.label === SUB_EFFORT || f.label === SUB_MODEL || f.label === AUTO_MODE || f.label === MEMORIES || f.label === "sign-in" || f.key === "small" || asideAccount(a, f)) && !f.options.length && !f.value;
-    const shownFields = a.fields.filter((f) => !grouped(a, f) && !none(f));
+    const shownFields = a.fields.filter((f) => !grouped(a, f) && !none(f) && !codexOwnSub(a, f) && !codexRowed(a, f));
     const tiers = tierMenu(a);
     if (tiers) shownFields.push(tiers);
     const sorted = shownFields.sort((x, y) => wide(y) - wide(x) || extra(x) - extra(y));
@@ -609,6 +610,8 @@ function renderAgents() {
       row.classList.add("drifted");
       if (!kind) who.append(driftFix(a));
     }
+    // an app started before magpie's last change (the panel's row)
+    else if (!kind && a.appRestart) who.append(appRestart(a));
     // the CLI's version, and an update when one is out (#202); the panel's
     // name column has no room for it
     if (mode !== "panel") who.append(cliTag(a));
@@ -647,9 +650,10 @@ function renderAgents() {
   // pickers keep lining up down the list
   // (a row whose CLI is gone has none)
   const setUp = state.agents.filter((a) => !a.cliMissing);
-  list.classList.toggle("extras", setUp.some((a) => a.fields.some(extra) || tierMenu(a) || a.launch));
+  const sq = (a) => a.fields.filter((f) => extra(f) && !codexRowed(a, f));
+  list.classList.toggle("extras", setUp.some((a) => sq(a).length || tierMenu(a) || a.launch));
   // as wide as the row with the most squares
-  list.style.setProperty("--extras", Math.max(1, ...setUp.map((a) => a.fields.filter((f) => extra(f) && !grouped(a, f)).length + (tierMenu(a) ? 1 : 0) + (a.launch ? 1 : 0))));
+  list.style.setProperty("--extras", Math.max(1, ...setUp.map((a) => sq(a).filter((f) => !grouped(a, f)).length + (tierMenu(a) ? 1 : 0) + (a.launch ? 1 : 0))));
   if (!folded.length) {
     for (const a of used) list.append(agentRow(a));
   } else {
@@ -800,7 +804,7 @@ function renderProfiles() {
     c._profile = p.name;
     if (profilePending.has(p.name)) c.classList.add("pending");
     const lib = profileLibrary(p.library);
-    c.title = [p.inUse && t("In use"), p.summary, lib].filter(Boolean).join("\n");
+    c.title = tipLines(p.inUse && t("In use"), p.summary, lib);
     // the one the setup is now, ticked as a menu ticks the item in effect
     if (p.inUse) {
       c.classList.add("cur");
@@ -1329,6 +1333,7 @@ function connectLine(a, kind) {
     else if (src === "key") say(t("Not connected · now on an API key of its own"));
     else if (src.startsWith("providers:")) say(t("Not connected · now has {n} providers of its own", { n: src.slice(10) }));
     else say(t("Not connected · {agent} uses its own settings", { agent: a.name }));
+    if (a.appRestart) line.append(appRestart(a));
     return line;
   }
   if (a.native) {
@@ -1342,6 +1347,11 @@ function connectLine(a, kind) {
     return line;
   }
   line.classList.add("on");
+  if (a.appRestart) {
+    say(t("Connected · restart {agent} to use it", { agent: a.name }), "wait");
+    line.append(appRestart(a));
+    return line;
+  }
   if (staleNow(a)) {
     if (a.id === "claude") say(t("Connected · new sessions take it"));
     else {
@@ -1830,13 +1840,17 @@ function daemonRestart() {
   return go;
 }
 
+// asked first: what runs in the app stops
+const confirmRestart = (name) => confirmAction(t("Restart {agent}?", { agent: name }), t("magpie quits {agent} and opens it again, so it reads the new settings. Anything running in it stops.", { agent: name }), t("Restart"));
+
 // appReopen is the Restart beside the Codex app left on the old list: magpie
-// quits it, as ⌘Q does, and opens it again
+// asks, then quits it, as ⌘Q does, and opens it again
 function appReopen(bundle) {
   const go = el("button", "ag-quiet accent", t("Restart"));
   go.type = "button";
   go.title = bundle;
   go.onclick = async () => {
+    if (!(await confirmRestart(t("The Codex app")))) return;
     go.disabled = true;
     go.classList.add("busy");
     try {
@@ -1848,6 +1862,31 @@ function appReopen(bundle) {
       go.disabled = false;
       go.classList.remove("busy");
       status(e.message, "err");
+    }
+  };
+  return go;
+}
+
+// appRestart: a desktop app running on what it read before magpie's last
+// change (agent.AppBehind) is quit and opened again
+function appRestart(a) {
+  const go = el("button", "ag-fix ag-restart");
+  go.type = "button";
+  go.title = t("{agent} started {when}, before magpie's last change, and reads it only as it starts", { agent: a.name, when: ago(a.appRestart.since) });
+  go.setAttribute("aria-label", t("Restart {agent}", { agent: a.name }));
+  go.append(svg(REAPPLY, 11, 1.8), el("span", "", t("Restart")));
+  go.onclick = async (e) => {
+    e.stopPropagation();
+    if (!(await confirmRestart(a.name))) return;
+    go.disabled = true;
+    go.classList.add("busy");
+    try {
+      state = await api("agents/restart/" + a.id, {});
+      renderAgents();
+      status(t("{agent} restarted", { agent: a.name }));
+    } catch (err) {
+      if (go.isConnected) { go.disabled = false; go.classList.remove("busy"); }
+      status(tNotice(err.message), "err");
     }
   };
   return go;
@@ -3743,6 +3782,32 @@ const LEAD_PICKS = "Codex's lead may name another model for a subagent; set the 
 // its pick, not "same as model" (KorenKrita on Discord)
 const CLAUDE_PICKS = "Claude Code's lead, or a subagent's own definition, may name a model or tier for it; a model set here is for the subagents that name none";
 const claudePicks = (a, f) => leadPicks(a, f) && a.id === "claude";
+// Codex had two squares for its subagents' model, the subagents one above
+// and the subagent model, and nobody could tell them apart (the owner): the
+// card shows the subagent model alone, saying plainly what each choice
+// does. A pick there takes away [agents] default_subagent_model too (the
+// backend), and one left in the config is said on it until then. With no
+// model of magpie's to pick there, Codex's own square stays.
+const codexSub = (a) => a.id.split("@wsl:")[0] === "codex" && a.fields.some((f) => f.label === SUB_MODEL && (f.options.length || f.value));
+const codexOwnSub = (a, f) => f.label === "subagents" && codexSub(a);
+// named rows in Codex's settings: no square too (the owner, 10-25)
+const codexRowed = (a, f) => a.id === "codex" && !gatewayMode && (f.label === SUB_MODEL || f.label === MEMORIES);
+const SAME_AS_LEAD = "Same as the lead";
+const SUB_MODEL_UNSET = "Each subagent runs on the lead's model ({model}), or on another the lead picks for it. Pick a model here to put every subagent on it.";
+const SUB_MODEL_UNSET_PLAIN = "Each subagent runs on the lead's model, or on another the lead picks for it. Pick a model here to put every subagent on it.";
+const SUB_MODEL_SET = "Every subagent runs on this model, whatever the lead asks for.";
+const SUB_MODEL_OLD = "Codex's config still starts subagents on {model} when the lead names none; picking here replaces it.";
+// codexSubSaid: what Codex's subagent model is, in words: its value, and a
+// line on what it does
+function codexSubSaid(a, f) {
+  const opt = optionFor(f, f.value);
+  const main = a.fields.find((x) => x.key === "model");
+  const lead = main && (optionFor(main, main.value)?.label || main.value);
+  const old = a.fields.find((x) => x.label === "subagents")?.value;
+  const name = f.value ? opt?.label || f.value : t(SAME_AS_LEAD);
+  const line = f.value ? t(SUB_MODEL_SET) : (lead ? t(SUB_MODEL_UNSET, { model: lead }) : t(SUB_MODEL_UNSET_PLAIN)) + (old ? "\n" + t(SUB_MODEL_OLD, { model: optionFor(a.fields.find((x) => x.label === "subagents"), old)?.label || old }) : "");
+  return { name, line, old, lead };
+}
 const extra = (f) => f.key === "tiers" || FOLLOWS_MODEL.includes(f.label) || f.label === "sign-in" || f.key === "ultracode" || f.label === SUB_EFFORT || f.label === SUB_MODEL || f.label === AUTO_MODE || f.label === MEMORIES;
 const EXTRA_GLYPH = {
   subagents: "M4.5 2.75v10.5M4.5 9.25c0-2.2 1.6-3.75 3.9-3.75h3.35M9.9 3.6l1.9 1.9-1.9 1.9",
@@ -3766,11 +3831,13 @@ const EXTRA_GLYPH = {
 const MEMORIES_DEFAULT = "Codex's own: gpt-5.6-terra, threads summed up with gpt-5.6-luna";
 function extraField(a, f) {
   if (f.key === "ultracode") return ultracodeToggle(a, f);
-  const set = !!(f.value || f.custom);
+  const said = f.label === SUB_MODEL && codexSub(a) ? codexSubSaid(a, f) : null;
+  const set = !!(f.value || f.custom || said?.old);
   const b = el("button", "field extra" + (set ? " set" : ""));
   b.append(svg(EXTRA_GLYPH[f.label] || EXTRA_GLYPH.tiers, 13, 1.5));
   const opt = optionFor(f, f.value);
-  b.title = f.label === SUB_EFFORT ? subEffortTitle(a, f, opt) : f.menu ? menuTitle(f)
+  b.title = said ? t("{label}: {value}", { label: t(f.label), value: said.name }) + "\n" + said.line
+    : f.label === SUB_EFFORT ? subEffortTitle(a, f, opt) : f.menu ? menuTitle(f)
     : t("{label}: {value}", { label: f.label === MEMORIES ? t("Codex memories model") : t(f.label), value: t(opt?.label || f.value || (f.label === MEMORIES ? MEMORIES_DEFAULT : f.label === SUB_MODEL ? "the model the lead asks for" : f.label === AUTO_MODE ? AUTO_MODE_UNSET : leadPicks(a, f) ? "the lead's pick, else same as model" : "same as model")) }) + (opt?.note && !FOLLOWS_MODEL.includes(f.label) ? "\n" + t(opt.note) : "") + (leadPicks(a, f) ? "\n" + t(claudePicks(a, f) ? CLAUDE_PICKS : LEAD_PICKS) : "");
   b.setAttribute("aria-label", b.title);
   b.dataset.key = f.key;
@@ -3952,20 +4019,30 @@ if (mode === "window") {
 // extra is room about to be taken (or given back), e.g. by agents unrolling;
 // glide moves the panel's edge there over time instead of at once.
 // The panel is as tall as its tallest tab, not the one showing, so it keeps
-// its height as the tabs change and a shorter tab leaves room below (#124):
-// every tab is laid out at once for the measure, before anything is drawn.
+// its height as the tabs change and a shorter tab leaves room below (#124).
+// Margins count; tabs lay out at once (hiding one ends its motion).
 function fit(extra = 0, glide) {
   if (mode !== "panel") return;
-  const body = document.body, tab = body.dataset.ptab;
+  const body = document.body, v = $("#view-agents"), tab = body.dataset.ptab, f = parseFloat, vs = getComputedStyle(v);
   delete body.dataset.ptab;
-  // extra is only ever the agents' (a row opening, the scroll unrolling)
-  const tallest = Math.max($("#agents").offsetHeight + extra, $("#panelQuota").offsetHeight, $("#panelRouting").offsetHeight, $("#panelUsage").offsetHeight);
+  const n = { agents: extra, usage: 0, stats: 0, routing: 0 };
+  for (const c of v.children) {
+    const cs = getComputedStyle(c), px = cs.display == "none" ? 0 : c.offsetHeight + f(cs.marginTop) + f(cs.marginBottom);
+    const o = { agentsLead: "agents", agents: "agents", panelQuota: "usage", panelUsage: "stats", panelRouting: "routing" }[c.id];
+    for (const t in n) if (!o || o == t) n[t] += px;
+  }
+  const h = Math.ceil(body.clientHeight - v.offsetHeight + f(vs.paddingTop) + f(vs.paddingBottom) + Math.max(...Object.values(n)));
   if (tab) body.dataset.ptab = tab;
-  const h = $(".top").offsetHeight + $("#ptabs").offsetHeight + tallest + $(".foot").offsetHeight + 4;
   if (h === fit.last) return;
   fit.last = h;
   const still = !glide || calm();
   api("window/fit?h=" + h + (still ? "" : "&ms=" + glide.ms + "&ease=" + glide.ease), {});
+}
+
+// the panel brought up on its Allowances tab is the reader opening them
+// (#1588); the page loaded while the panel is still put away is not
+function panelQuotasNow(again) {
+  panelTab === "usage" && !document.hidden && (again || document.hasFocus()) ? quotasOpened() : loadQuotas();
 }
 
 // again: the window came back (focused, or shown again), which only reads
@@ -3982,6 +4059,9 @@ async function load(again) {
   try {
     const since = prefsWrites, hid = hiddenIds().join(), visibilitySince = agentsVisibilityRevision;
     const asked = api("state");
+    // the panel's allowances asked beside the state, not after it (#3134)
+    const early = mode === "panel" && !load.done;
+    if (early) panelQuotasNow(again);
     // the first load draws the state magpie kept from its last read while
     // the fresh one is read (#1519, fatkun): reading every agent's config,
     // and a WSL distro's through \\wsl.localhost, took seconds after a
@@ -3997,6 +4077,7 @@ async function load(again) {
         tintPanel();
         tintTitleBar();
         renderAgents();
+        if (mode === "panel") renderPanelQuota(true);
       }
     }
     let next = await asked;
@@ -4032,9 +4113,7 @@ async function load(again) {
     loadInstalls();
     // the Providers page made ready behind the one shown (#1519)
     if (mode !== "panel" && !(view === "providers" || providersPage(view))) prefetchProviders();
-    // the panel brought up on its Allowances tab is the reader opening
-    // them (#1588); the page loaded while the panel is still put away is not
-    if (mode === "panel") { renderPanelQuota(true); panelTab === "usage" && !document.hidden && (again || document.hasFocus()) ? quotasOpened() : loadQuotas(); }
+    if (mode === "panel") { renderPanelQuota(true); if (!early) panelQuotasNow(again); }
     // an open provider editor is someone typing: coming back to the window
     // must not rebuild it under them
     if ((view === "providers" || providersPage(view)) && !(editing || adding)) await loadProviders();
@@ -4294,20 +4373,38 @@ async function whatsNewOnce() {
 }
 
 // openWhatsNew is Settings' way back to the notes: the current version's (or
-// those since the last update), after the waiting update's when u has one.
-// The notes that couldn't be had (the site failing, #661) say so, with a
-// retry and the release page, apart from a version that has none.
-async function openWhatsNew(u, b) {
+// those since the last update), after those of every release up to the
+// waiting update (pending), which the app puts first. The notes that
+// couldn't be had (the site failing, #661) say so, with a retry and the
+// release page, apart from a version that has none.
+// last: the range picked (wnRange), "" since the last update; a failed ask
+// keeps the notes last shown (wnKept).
+let wnKept = null;
+async function openWhatsNew(b, last = "") {
   if (b) { b.disabled = true; b.classList.add("busy"); }
-  const w = await api(updatePath("whatsnew?all=1")).catch(() => null);
+  const w = await api(updatePath("whatsnew?all=1" + (last && "&last=" + last))).catch(() => null);
   if (b) { b.disabled = false; b.classList.remove("busy"); }
-  const list = [...(w?.releases || [])];
-  if (u?.notes && u.latest && ["ready", "available", "downloading", "found"].includes(u.state) && !list.some((r) => r.version === u.latest)) {
-    list.unshift({ version: u.latest, notes: u.notes, url: u.url, pending: true });
-  }
-  const failed = !w || !!w.error;
+  let list = w?.releases || [], failed = !w || !!w.error;
+  if (!failed) wnKept = list;
+  else if (!list.length && wnKept) list = wnKept;
   if (!list.length && !w?.current) return status(t("Couldn't load the release notes"), "err");
-  showWhatsNew(list, false, { failed, current: w?.current, url: w?.url, retry: () => openWhatsNew(u) });
+  showWhatsNew(list, false, { failed, current: w?.current, url: w?.url, last, retry: () => openWhatsNew(null, last) });
+}
+
+// wnRange is Settings' pick of which notes (Linka): since the last update,
+// or this version and 10, 20, 50 or 100 before it
+function wnRange(last) {
+  const name = (v) => v ? t("This version and {n} before", { n: v }) : t("Since the last update");
+  const b = el("button", "sess-pick wn-range");
+  b.type = "button";
+  b.setAttribute("aria-haspopup", "menu");
+  b.append(el("span", "", name(last)), svg(CHEV, 11, 1.6));
+  b.onclick = (e) => {
+    e.stopPropagation();
+    if (b.classList.contains("open")) return closeProtoMenu();
+    openProtoMenu(b, ["", "10", "20", "50", "100"].map((v) => ({ v, name: name(v), note: "", literalName: true })), last, (v) => v !== last && openWhatsNew(b, v), "Release notes shown", "sess-menu", "right");
+  };
+  return b;
 }
 
 // auto: shown by itself after an update, with "Don't show again today"
@@ -4319,8 +4416,20 @@ function showWhatsNew(releases, auto, more = {}) {
   const ed = el("div", "editor whatsnew");
   const head = el("div", "ehead");
   head.append(el("b", "", t("What's new in {v}", { v: "v" + (releases[0]?.version || more.current) })));
+  if (!auto) head.append(el("span", "grow"), wnRange(more.last || ""));
   ed.append(head);
-  for (const r of releases) {
+  if (releases.length > 1) {
+    const sec = el("section", "wn-rel");
+    const wait = releases.filter((r) => r.pending);
+    if (wait.length) {
+      const h = el("div", "wn-ver");
+      h.append(el("b", "", "v" + wait.at(-1).version + (wait.length > 1 ? " – v" + wait[0].version : "")), el("span", "badge", t("Not installed yet")));
+      sec.append(h);
+    }
+    sec.append(mergedNotes(releases));
+    ed.append(sec);
+  }
+  else for (const r of releases) {
     const sec = el("section", "wn-rel");
     const h = el("div", "wn-ver");
     h.append(el("b", "", "v" + r.version));
@@ -4346,7 +4455,7 @@ function showWhatsNew(releases, auto, more = {}) {
     }
     if (more.url) acts.append(noteLink(t("Open the release page"), more.url));
     sec.append(h, p, acts);
-    ed.append(sec);
+    head.after(sec); // above the notes kept from before
   }
   const bar = el("div", "bar");
   const ok = el("button", "text primary", t("Close"));
@@ -4389,6 +4498,54 @@ function noteBlocks(md) {
       list = null;
       box.append(inlineMD(el("p"), line.trim()));
     }
+  }
+  return box;
+}
+
+// NOTE_ORDER: the merged notes' sections, what's new first
+const NOTE_ORDER = ["Features", "Improvements", "Performance Improvements", "Bug Fixes", "Security", "Provider Changes", "Changes", "Documentation"];
+
+// mergedNotes draws many releases' notes as one (the owner: nine releases
+// of a line each read as a scattered list): their bullets gathered under
+// one heading per kind, New features first, each with the version it came
+// in, newest first, and a line that says the range. A line outside a list
+// is a bullet of its own; a release with no notes is left out.
+function mergedNotes(releases) {
+  const secs = new Map();
+  for (const r of releases) {
+    const of = (k) => secs.get(k) || secs.set(k, []).get(k);
+    let sec = null, li = null;
+    const put = (text) => {
+      sec ??= of(t("Changes"));
+      li = sec.some((b) => b.text === text) ? null : { text, v: r.version };
+      if (li) sec.push(li);
+    };
+    for (const line of String(r.notes || "").split(/\r?\n/)) {
+      const h = /^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$/.exec(line);
+      const b = /^\s*[-*+]\s+(.*)$/.exec(line);
+      if (h) {
+        sec = of(tHeading(h[1]));
+        li = null;
+      } else if (b) put(b[1]);
+      else if (!line.trim()) li = null;
+      else if (li && /^\s{2,}\S/.test(line)) li.text += " " + line.trim();
+      else put(line.trim());
+    }
+  }
+  const rank = (k) => { const i = NOTE_ORDER.findIndex((o) => t(o) === k); return i < 0 ? NOTE_ORDER.length : i; };
+  const box = el("div", "wn-notes wn-merged");
+  const vs = releases.map((r) => r.version);
+  box.append(el("div", "wn-span", t("{n} releases · {from} – {to}", { n: vs.length, from: "v" + vs.at(-1), to: "v" + vs[0] })));
+  for (const [k, items] of [...secs].filter(([, x]) => x.length).sort((a, b) => rank(a[0]) - rank(b[0]))) {
+    const h = el("div", "wn-h wn-h2");
+    h.append(k, el("span", "wn-n", String(items.length)));
+    const list = el("ul");
+    for (const it of items) {
+      const e = inlineMD(el("li"), it.text);
+      e.append(el("span", "wn-v", "v" + it.v));
+      list.append(e);
+    }
+    box.append(h, list);
   }
   return box;
 }
@@ -4437,7 +4594,12 @@ async function confirmUpdate(u, go) {
   const box = el("div", "wn-list");
   const draw = (releases) => {
     box.replaceChildren();
-    for (const r of releases) {
+    if (releases.length > 1) {
+      const sec = el("section", "wn-rel");
+      sec.append(mergedNotes(releases));
+      box.append(sec);
+    }
+    else for (const r of releases) {
       const sec = el("section", "wn-rel");
       const h = el("div", "wn-ver");
       h.append(el("b", "", "v" + r.version));
@@ -4646,6 +4808,10 @@ function openPicker(agent, field, anchor, ev, only) {
       : main && leadPicks(agent, field) ? { value: "", label: t("Lead's pick"), note: t("{model} unless the lead names another", { model: mainName }), icon: optionFor(main, main.value)?.icon, reset: true }
       : main ? { value: "", label: t("Same as model"), note: mainName, icon: optionFor(main, main.value)?.icon, reset: true }
       : { value: "", label: t("Not set"), note: t("a Claude model of the tier, else the chat's model"), icon: agent.icon, reset: true });
+  } else if (field.label === SUB_MODEL && codexSub(agent) && !options.some((o) => o.value === "")) {
+    const said = codexSubSaid(agent, { ...field, value: "" });
+    const main = agent.fields.find((f) => f.key === "model");
+    options.unshift({ value: "", label: t(SAME_AS_LEAD), note: said.lead ? t("{model}, or another the lead picks for a subagent", { model: said.lead }) : t("the lead's model, or another the lead picks for a subagent"), icon: (main && optionFor(main, main.value)?.icon) || agent.icon, reset: true });
   } else if (!only && !field.menu && !field.onPick && !options.some((o) => o.value === "")) {
     // Pi has no default model of its own: with none set it takes the first
     // provider signed in, in its own order, so Default is no fixed model
@@ -7120,107 +7286,6 @@ function renderArchive() {
   } else err?.remove();
 }
 
-// What was read back from the archive, by "<date>/<id>": the archive's
-// copy, or {busy} while it is read, or {error}.
-const archivedCalls = new Map();
-
-function headersPanel(label, first, headers) {
-  const panel = el("section", "call-body");
-  const head = el("div", "call-body-head");
-  const lines = [first, ...Object.keys(headers || {}).sort().flatMap((k) => headers[k].map((v) => `${k}: ${v}`))].filter(Boolean);
-  head.append(el("span", "call-body-label", label), el("span", "grow"), copyBtn(lines.join("\n"), label));
-  const pre = el("pre");
-  pre.append(el("code", "", lines.join("\n")));
-  panel.append(head, pre);
-  return panel;
-}
-
-// The archived file, whole, however large: to the browser in magpie web,
-// to Downloads in the app (#447).
-async function downloadArchive(name, b) {
-  const [date, aid] = name.split("/");
-  const q = `date=${encodeURIComponent(date)}&id=${encodeURIComponent(aid)}`;
-  if (web) {
-    const a = el("a");
-    a.href = "/api/archive/file?" + q;
-    a.download = "";
-    a.click();
-    return;
-  }
-  b.classList.add("busy");
-  b.disabled = true;
-  try {
-    const r = await api("archive/export?" + q, {});
-    status(t("Saved to {path}", { path: r.path }), "ok");
-  } catch (e) {
-    status(t(e.message), "err");
-  } finally {
-    b.classList.remove("busy");
-    b.disabled = false;
-  }
-}
-
-// one body read back from the archive: shown, or, past 256 KB, only its
-// size — the server leaves it out — for the file to be downloaded whole
-function archiveBodyPanel(label, part, id, key = id) {
-  if (part.omitted) {
-    const panel = el("section", "call-body");
-    const head = el("div", "call-body-head");
-    head.append(el("span", "call-body-label", t(label)), el("span", "call-body-count", fmtBytes(part.size)));
-    panel.append(head, el("p", "call-archive-big", t("Too long to show here. Download the archive to read it whole.")));
-    return panel;
-  }
-  // cut where the archive stops: its limit, or 256 KB in one from before #447
-  const cut = part.truncated && (part.size ? t("first {n} of {size}", { n: fmtBytes(new Blob([part.body]).size), size: fmtBytes(part.size) }) : true);
-  return callBodyPanel(label, part.body, cut, id, key);
-}
-
-// A call the archive kept, by "<date>/<id>": read back when asked, and its
-// file downloaded, drawn again by redraw as it is read — under a request's
-// row on the Usage page (the Gateway page's recent calls show their own
-// bodies, and no longer the archive's copy as well).
-function archivePanel(name, id, redraw) {
-  const box = el("section", "call-archive");
-  const [date, aid] = name.split("/");
-  const got = archivedCalls.get(name);
-  const head = el("div", "call-body-head");
-  head.append(el("span", "call-body-label", t("Request archive")), el("code", "call-archive-id", name), el("span", "grow"));
-  box.append(head);
-  const dl = el("button", "text call-archive-dl", t("Download"));
-  dl.onclick = (ev) => { ev.stopPropagation(); downloadArchive(name, dl); };
-  if (!got || got.busy || got.error) {
-    const b = el("button", "text", t(got?.busy ? "Fetching…" : "Fetch from archive"));
-    b.disabled = !!got?.busy;
-    b.onclick = (ev) => {
-      ev.stopPropagation();
-      archivedCalls.set(name, { busy: true });
-      redraw();
-      api(`archive?date=${encodeURIComponent(date)}&id=${encodeURIComponent(aid)}`)
-        .then((a) => archivedCalls.set(name, a))
-        .catch((e) => archivedCalls.set(name, { error: t(e.message) }))
-        .finally(redraw);
-    };
-    head.append(b);
-    if (got?.error) box.append(el("div", "call-archive-err", got.error));
-    else head.append(dl); // one not in the bucket has nothing to download
-    return box;
-  }
-  head.append(el("span", "call-body-truncated call-archive-note", t("Secrets taken out")), dl);
-  if (got.large) {
-    box.append(el("p", "call-archive-big", t("This archive is {size}, too large to show here. Download it to read it.", { size: got.bytes > 0 ? fmtBytes(got.bytes) : t("very large") })));
-    return box;
-  }
-  const grid = el("div", "call-details");
-  grid.append(
-    headersPanel(t("Request Headers"), `${got.request.method || ""} ${got.request.path || ""}`.trim(), got.request.headers),
-    headersPanel(t("Response Headers"), got.response.status ? `HTTP ${got.response.status}` : "", got.response.headers),
-    archiveBodyPanel("Request Body", got.request, undefined, id + "|archive|req"),
-    archiveBodyPanel("Response Body", got.response, id + "|archive"),
-  );
-  box.append(grid);
-  return box;
-}
-
 // An agent's model field, and whether any of its options come from provider p.
 function modelField(a) {
   const agent = state.agents.find((x) => x.id === a.id);
@@ -8008,7 +8073,7 @@ function advancedSet(d, p) {
   return (d.headers || []).some(([k]) => (k || "").trim()) || !!(d.extraBody || "").trim() ||
     !!d.proxyMode || Object.values(d.accountProxies || {}).some((x) => x?.mode) ||
     [d.concurrency, d.queueLimit, d.queueWait, d.maxRPM, d.priceRate, d.contexts, d.outputs, d.compacts].some((v) => String(v ?? "").trim()) ||
-    !!(d.searches || d.authHeader || d.passUserAgent || d.unredacted || d.pinUpstream || d.nativeCompaction || d.balanceToken) ||
+    !!(d.searches || d.authHeader || d.passUserAgent || d.unredacted || d.pinUpstream || d.nativeCompaction || d.balanceToken || d.limitRestOff) ||
     !!d.fallback?.length || !!p?.balanceToken?.set;
 }
 function priceRateError(ed) {
@@ -9043,7 +9108,7 @@ function baseAPIOf(p) {
 
 // draftOf is a saved provider as its editor's form holds it.
 function draftOf(p) {
-  return { id: p.id, name: p.name, preset: p.preset, chat: p.chat, responses: p.responses, anthropic: p.anthropic, gemini: p.gemini || "", catalog: p.catalog, decide: p.decide || "", key: "", api: baseAPIOf(p), chosen: pickedOf(p), none: !!p.noModels, extra: [], headers: headerRows(p.headers), extraBody: extraBodyText(p.extraBody), icon: p.icon || "", fallback: [...(p.fallback || [])], unlisted: !!p.unlisted, searches: !!p.searches, unredacted: !!p.unredacted, insecureTLS: !!p.insecureTLS, nativeCompaction: !!p.nativeCompaction, passUserAgent: !!p.passUserAgent, pinUpstream: !!p.pinUpstream, authHeader: p.authHeader || "", balanceURL: p.balanceURL || "", balancePath: p.balancePath || "", balanceMethod: p.balanceMethod || "", modelsURL: p.modelsURL || "", contexts: contextsText(p.contexts), outputs: contextsText(p.outputs), compacts: contextsText(p.compacts), keysUrl: p.keysUrl || "", ...proxyDraft(p), ...concurrencyDraft(p) };
+  return { id: p.id, name: p.name, preset: p.preset, chat: p.chat, responses: p.responses, anthropic: p.anthropic, gemini: p.gemini || "", catalog: p.catalog, decide: p.decide || "", key: "", api: baseAPIOf(p), chosen: pickedOf(p), none: !!p.noModels, extra: [], headers: headerRows(p.headers), extraBody: extraBodyText(p.extraBody), icon: p.icon || "", fallback: [...(p.fallback || [])], unlisted: !!p.unlisted, searches: !!p.searches, unredacted: !!p.unredacted, insecureTLS: !!p.insecureTLS, limitRestOff: !!p.limitRestOff, nativeCompaction: !!p.nativeCompaction, passUserAgent: !!p.passUserAgent, pinUpstream: !!p.pinUpstream, authHeader: p.authHeader || "", balanceURL: p.balanceURL || "", balancePath: p.balancePath || "", balanceMethod: p.balanceMethod || "", modelsURL: p.modelsURL || "", contexts: contextsText(p.contexts), outputs: contextsText(p.outputs), compacts: contextsText(p.compacts), keysUrl: p.keysUrl || "", ...proxyDraft(p), ...concurrencyDraft(p) };
 }
 
 // duplicateProvider opens the Add form on a copy of p (#268): its URLs,
@@ -9412,8 +9477,10 @@ function drawEditor(p, presetID) {
 
   // a server on this machine (Ollama, LM Studio, oMLX, MLX-Serve) can
   // listen on another port, or be another computer's: its address moves each URL, each API
-  // keeping its path, as provider.AtAddress does
-  let address = null, addressMore = null;
+  // keeping its path, as provider.AtAddress does. Shown first and never
+  // folded: folded under the key, an LM Studio on another computer read
+  // as one whose base URL can't be changed (mengxiangziyou on X)
+  let address = null, addressField = null;
   if (pr?.kind === "local") {
     // a saved provider's URLs (or a duplicate's) start it; a new one's are
     // the preset's, sent as none unless moved, so the gateway takes them
@@ -9421,8 +9488,7 @@ function drawEditor(p, presetID) {
     // oMLX's decision API (#1641) is the same server's, and moves with it
     draft.addressFrom ??= { chat: draft.chat ?? pr.chat ?? "", responses: draft.responses ?? pr.responses ?? "", anthropic: draft.anthropic ?? pr.anthropic ?? "", decide: draft.decide ?? (p?.decide || pr.decide || "") };
     draft.addressWas ??= own ? originOf(draft.addressFrom) : "";
-    const from = draft.addressFrom, addressWas = draft.addressWas;
-    draft.address ??= addressWas;
+    draft.address ??= draft.addressWas;
     address = input(draft.address, originOf(pr));
     address.inputMode = "url";
     address.classList.add("address");
@@ -9436,14 +9502,7 @@ function drawEditor(p, presetID) {
     };
     const keys = address.onkeydown;
     address.onkeydown = (e) => { keys(e); if (e.key === "Enter" && isNew) save(); };
-    // folded: most run where the preset says; open for one that doesn't,
-    // or an address typed before the editor was drawn again
-    addressMore = el("details", "more");
-    addressMore.open = (own && originOf(from) !== originOf(pr)) || draft.address.trim() !== addressWas;
-    addressMore.append(el("summary", "", t("Server address")));
-    const inner = el("div", "inner");
-    inner.append(...field(t("Address"), address, t("Where the server listens; change the port, or give another computer's address")));
-    addressMore.append(inner);
+    addressField = field(t("Server address"), address, t("Where the server listens; change the port, or give another computer's address"));
   }
 
   // null, not false, when there is none: false?.key is undefined, and a
@@ -9546,11 +9605,11 @@ function drawEditor(p, presetID) {
       ...field(t("Service account"), box("impersonate", t("optional · a service account's email"), "vertex-impersonate"), t("Requests are then made as this service account, impersonated with the credentials above: their account needs roles/iam.serviceAccountTokenCreator on it.")),
     ];
   };
+  if (addressField) ed.append(...addressField);
   if (p?.keyList?.length) ed.append(...field(t("Accounts"), renderKeyAccounts(p), p.routing ? t("Tick every key to use; Routing says how requests spread over them.") : t("Tick every key to use. Requests go to the first; when it runs out of quota or hits a rate limit, the next ticked key takes over.")));
   if (p?.keyList?.filter((k) => k.on).length > 1) ed.append(...renderRouting(p));
   else if (vertex) ed.append(...vertexFields());
   else ed.append(...field(t("API key"), keyWrap, isNew ? t("Kept in ~/.config/magpie/providers.json, readable by you alone. Nothing is read from your shell.") : ""));
-  if (addressMore) ed.append(addressMore);
 
   // A user-defined provider can have its own picture; presets keep theirs.
   if (custom) ed.append(...field(t("Icon"), iconPicker(ed), ""));
@@ -9653,6 +9712,12 @@ function drawEditor(p, presetID) {
     showTLS = () => { for (const e of row) e.style.display = onHTTPS() ? "" : "none"; };
     showTLS();
     ed.append(...row);
+  }
+  // off, a 429 or quota refusal rests none of its keys (LimitRestOff, zoecats)
+  if (custom) {
+    const [rtk, rcb] = tick(t("Set it aside when out of quota or rate limited"), !draft.limitRestOff);
+    rcb.onchange = () => { draft.limitRestOff = !rcb.checked; };
+    advIn.append(...field(t("Rests"), rtk, t("Off: a 429 or an out-of-quota refusal doesn't rest its keys, and the next request is sent to it as usual. For a relay whose limits pass in a moment.")));
   }
 
   // a vendor that tells the whole account's balance only to a token of its
@@ -10002,6 +10067,7 @@ function drawEditor(p, presetID) {
     if (twoKeyHeaders()) body.authHeader = draft.authHeader || "";
     body.unredacted = !!draft.unredacted && onLAN();
     if (tlsTakes()) body.insecureTLS = !!draft.insecureTLS && onHTTPS();
+    if (custom) body.limitRestOff = !!draft.limitRestOff;
     if (!decideOnly(p || pr)) body.nativeCompaction = !!draft.nativeCompaction && carriesCompaction();
     body.passUserAgent = !!draft.passUserAgent && uaPassable();
     const cx = parseContexts(draft.contexts || "");
@@ -10057,7 +10123,7 @@ function drawEditor(p, presetID) {
     if (vertex && !body.vertex.project) { vertexProject?.focus({ preventScroll: true }); return editorError(t("Google Vertex AI needs the id of your Google Cloud project"), "warn"); }
     if (address) {
       const a = (draft.address || "").trim();
-      if (localAddress(a) === null) { addressMore.open = true; address.focus({ preventScroll: true }); return editorError(t("Address: {v} isn't an address like http://localhost:11434", { v: a }), "warn"); }
+      if (localAddress(a) === null) { address.focus({ preventScroll: true }); return editorError(t("Address: {v} isn't an address like http://localhost:11434", { v: a }), "warn"); }
       Object.assign(body, movedURLs(draft));
     }
     editorError("");
@@ -10178,9 +10244,7 @@ function nativeCompactionField(show) {
 
 // compactField is the editor's Compact at (#876): where Codex and Claude
 // Code compact a conversation on its models when their window is longer,
-// one for all of them and model=size for one, as the window is set. Empty
-// follows Settings → Long conversations; one at or above a model's window
-// runs it to the whole window.
+// one for all of them and model=size for one, as the window is set.
 function compactField() {
   const cp = input(draft.compacts || "", t("e.g. 500k · or deepseek-v4-flash=272k, comma separated"));
   cp.classList.add("compacts");
@@ -10200,7 +10264,7 @@ function compactField() {
   light();
   const wrap = el("div", "cxfield");
   wrap.append(cp, row);
-  return field(t("Compact at"), wrap, t("Where Codex and Claude Code compact a long conversation on these models; empty follows Settings → Long conversations, and a size at or above a model's window runs it to its whole window"));
+  return field(t("Compact at"), wrap, t("Where Codex and Claude Code compact a long conversation on these models; empty follows Long conversations, in their settings on the Agents page (else in Settings), and a size at or above a model's window runs it to its whole window"));
 }
 
 function compactError(ed, v) {
@@ -13553,7 +13617,7 @@ function accountQuota(data, user, capFor = () => 0, settable = null) {
   if (q?.resets?.count && !q.error) {
     const words = resetsWords(q.resets);
     const resets = el("span", "aq-w aq-resets");
-    resets.title = [words.textContent, words.title].filter(Boolean).join("\n");
+    resets.title = tipLines(words.textContent, words.title);
     resets.append(words.querySelector(".resets-n"));
     line.append(resets);
   }
@@ -13582,23 +13646,23 @@ function accountQuota(data, user, capFor = () => 0, settable = null) {
   if (!ws.length) { line.append(el("span", "aq-none", t("Unlimited"))); return line; }
   if (ws.some((w) => w.members)) return poolLine(line, ws, q, capFor, settable);
   line.title = ws.slice(2).map((w) => w.tiers ? tiersText(w) : t(w.name) + " " + quotaText(w)).join(ws !== counted ? "\n" : " · ");
-  if (q.asOf) line.title = [line.title, asOfText(q)].filter(Boolean).join("\n");
+  if (q.asOf) line.title = tipLines(line.title, asOfText(q));
   for (const w of ws.slice(0, 2)) {
-    const used = Math.max(0, Math.min(100, w.used));
+    const used = to100(w.used);
     const m = el("span", "aq-w" + (used >= 90 ? " full" : ""));
     const track = el("span", "aq-track");
     const fill = el("i");
     fill.style.width = quotaFill(w) + "%";
     track.append(fill);
     capMark(track, w, capFor(w));
-    m.append(el("span", "aq-n", t(w.name)), track, el("b", "", quotaText(w)));
+    m.append(el("span", "aq-n", t(w.name)), ...(w.text ? [] : [track]), el("b", "", quotaText(w)));
     if (w.resetsAt) {
       const at = new Date(w.resetsAt);
       m.title = resetText(at, at.toLocaleString(intlLang()));
       if (used >= 80) m.append(el("span", "aq-r", resetInText(at)));
     }
     const out = runsOutText(w, (at) => at.toLocaleString(intlLang()));
-    if (out) m.title = [m.title, out].filter(Boolean).join("\n");
+    if (out) m.title = tipLines(m.title, out);
     if (w.tiers) m.title = tiersText(w);
     line.append(settable ? settable(m, w) : m);
   }
@@ -13606,8 +13670,9 @@ function accountQuota(data, user, capFor = () => 0, settable = null) {
 }
 
 // poolLine: an account row's pools, each its name then its 5-hour and
-// weekly meters (Gemini 5h ▬ 95% 7d ▬ 75%), two pools on the line and the
-// rest in its tooltip.
+// weekly meters (Gemini 5h ▬ 95% 7d ▬ 75%), every pool Google reports:
+// one left to the tooltip was Claude's once Gemini 4 Argon had its own
+// (01huadalang on Discord). The line wraps.
 function poolLine(line, ws, q, capFor = () => 0, settable = null) {
   const pools = [];
   for (const w of ws) {
@@ -13615,9 +13680,8 @@ function poolLine(line, ws, q, capFor = () => 0, settable = null) {
     const p = pools.find((x) => x.k === k);
     if (p) p.ws.push(w); else pools.push({ k, name: w.members ? w.pool : t(w.name), ws: [w] });
   }
-  line.title = pools.slice(2).map((p) => p.ws.map((w) => t(w.name) + " " + quotaText(w)).join(" · ")).join("\n");
-  if (q.asOf) line.title = [line.title, asOfText(q)].filter(Boolean).join("\n");
-  for (const p of pools.slice(0, 2)) {
+  if (q.asOf) line.title = asOfText(q);
+  for (const p of pools) {
     const m = el("span", "aq-w aq-pool" + (p.ws.some((w) => w.used >= 90) ? " full" : ""));
     m.append(el("span", "aq-n", p.name));
     for (const w of p.ws) {
@@ -13983,13 +14047,16 @@ setInterval(refreshLanes, 2000);
 // every meter and the menu bar, kept in the settings (#122). The vendor's
 // own count, where it gives one, stands before the percentage.
 let quotaLeft = false;
+function to100(v) { return Math.max(0, Math.min(100, v)); }
+function tipLines(...a) { return a.filter(Boolean).join("\n"); }
 function quotaFill(w) {
-  const used = Math.round(Math.max(0, Math.min(100, w.used)));
+  const used = Math.round(to100(w.used));
   return quotaLeft ? 100 - used : used;
 }
 function quotaText(w) {
   if (w.unlimited) return t("Unlimited");
-  const used = Math.max(0, Math.min(100, w.used));
+  if (w.text) return w.display;
+  const used = to100(w.used);
   const n = quotaLeft ? 100 - used : used;
   const pct = t(quotaLeft ? "{n} left" : "{n} used", { n: (Number.isInteger(n) ? n : n.toFixed(1)) + "%" });
   const count = quotaCount(w);
@@ -14006,7 +14073,7 @@ function quotaPace(w, now = Date.now()) {
   if (w.unlimited || w.historyMissing || !w.startsAt || !w.resetsAt) return null;
   const s = Date.parse(w.startsAt), e = Date.parse(w.resetsAt);
   if (!(e > s) || now < s || now >= e) return null;
-  const d = Math.max(0, Math.min(100, w.used)) - (100 * (now - s)) / (e - s);
+  const d = to100(w.used) - (100 * (now - s)) / (e - s);
   const n = Math.round(quotaLeft ? -d : d);
   return { n: n === 0 ? 0 : n, over: Math.round(d) > 0, under: Math.round(d) < 0, by: Math.abs(Math.round(d)) };
 }
@@ -14070,6 +14137,12 @@ function familyWindows(ws) {
 // same, show the 5 hours and the week left a group). The models' windows
 // in no pool go on as families.
 const isPool = (w) => w.pool && !w.family;
+// poolOfModel: a pool named for one model, its name saying a version
+// ("Gemini 4 Argon", apart from the other Gemini models'), not a family's.
+const poolOfModel = (p) => /\d/.test(p || "");
+// poolWord: a pool's short name for a ring: its first word, with the
+// version after it ("Gemini 4" for Gemini 4 Argon, beside Gemini's own).
+const poolWord = (p) => { const [a, b] = p.split(/[ &]+/); return /^\d/.test(b || "") ? a + " " + b : a; };
 function poolWindows(ws) {
   const pools = new Map();
   for (const w of ws.filter(isPool)) {
@@ -14080,7 +14153,10 @@ function poolWindows(ws) {
     const m = /^(\d+)\s*(hour|day|week)s?$/i.exec(w.name || "");
     return m ? m[1] * { hour: 1, day: 24, week: 168 }[m[2].toLowerCase()] : Infinity;
   };
-  const first = (p) => { const i = FAMILY_FIRST.indexOf(p.split(/[ &]/)[0]); return i < 0 ? FAMILY_FIRST.length : i; };
+  // a family's pools first (Gemini, then Claude & GPT), then the rest, and
+  // a model's own pool ("Gemini 4 Argon", one with a version) after them
+  // all, as agy's /usage lists it (01huadalang on Discord)
+  const first = (p) => { const i = FAMILY_FIRST.indexOf(p.split(/[ &]/)[0]); return poolOfModel(p) ? FAMILY_FIRST.length + 1 : i < 0 ? FAMILY_FIRST.length : i; };
   const rest = ws.filter((w) => !isPool(w) && !(w.pool && pools.has(w.pool)));
   let fam = familyWindows(rest);
   const out = [];
@@ -14091,7 +14167,9 @@ function poolWindows(ws) {
     // windows as families: they go in the pool's place, before its week,
     // so the card reads in the same order whether or not the summary sent
     // the 5 hours this time (#860: 5h and 7d swapped after a refresh)
-    if (!own.some((w) => hours(w) === 5)) {
+    // (a model's own pool stands for no family: Gemini 4 Argon's week
+    // takes no Gemini model's 5 hours)
+    if (!own.some((w) => hours(w) === 5) && !poolOfModel(pool)) {
       const mine = (w) => { const f = w.tiers ? w.name : w.family; return !!f && pool.toLowerCase().includes(f.toLowerCase()); };
       out.push(...fam.filter(mine));
       fam = fam.filter((w) => !mine(w));
@@ -14110,7 +14188,7 @@ function poolTip(w) {
 // ringName: a window's name short enough for a ring: a pool's first word
 // and its span (Gemini 5h, Claude 7d).
 function ringName(w) {
-  return w.window ? w.pool.split(/[ &]/)[0] + " " + shortWindow(w.window) : shortWindow(w.name);
+  return w.window ? poolWord(w.pool) + " " + shortWindow(w.window) : shortWindow(w.name);
 }
 
 // tiersText: a family's windows, one a line, for its tooltip.
@@ -15379,6 +15457,12 @@ function rollUpSheet(sheet, then) {
 // never waits for them. They don't depend on the period either.
 let quotas = null;
 let quotasAt = 0; // when they came in
+// the panel's last read, drawn at once, turning, until the read lands (#3160)
+let quotasKept = false;
+if (mode === "panel") try {
+  const kept = JSON.parse(localStorage.getItem("magpie.panelQuotas"));
+  if (Array.isArray(kept)) { quotas = kept; quotasKept = true; }
+} catch {}
 let quotaHist = []; // each account's windows over time, for the curves (#651)
 // quotasOpened: the reader opened what shows the allowances (the Usage
 // page's Overview, the tray panel's Allowances tab, a menu bar cell, either
@@ -15421,14 +15505,15 @@ function loadQuotas(asked, again) {
     .then((q) => {
       // an answer that isn't a list of cards is a read that failed: what
       // was read before stays, as it does when the read is refused
-      if (q != null && !Array.isArray(q)) { quotas = quotas || []; reading = false; return; }
+      if (q != null && !Array.isArray(q)) { quotas = quotas || []; quotasKept = reading = false; return; }
       q = keepRefreshedQuotas(q || [], began);
       // Whole-page reads are serialized; no older one still needs these
       // markers. A card reply must not retire them while a GET is pending.
       for (const [key, version] of quotaRefreshVersions) if (version <= began) quotaRefreshVersions.delete(key);
       same = !!again && !!quotas && JSON.stringify(q || []) === JSON.stringify(quotas);
-      quotas = q || []; quotasAt = Date.now();
-    }, () => { quotas = quotas || []; reading = false; })
+      quotas = q || []; quotasAt = Date.now(); quotasKept = false;
+      if (mode === "panel") try { localStorage.setItem("magpie.panelQuotas", JSON.stringify(quotas)); } catch {}
+    }, () => { quotas = quotas || []; quotasKept = reading = false; })
     .finally(() => {
       if (quotasLoading === p) quotasLoading = null;
       if (!same) renderQuotas(true);
@@ -15502,7 +15587,9 @@ function fmtN(n) {
 let currency = "usd";
 let fx = { rate: 0, at: null, stale: true };
 function fmtCost(t) {
-  if (!t.cost && t.unpriced) return "";
+  // no cost read (null, or a reply without one) is unknown: nothing shown,
+  // not $0 and not a throw that stops the page drawing (#3406)
+  if (typeof t.cost !== "number" || (!t.cost && t.unpriced)) return "";
   let c = t.cost, sign = "$";
   if (currency === "cny" && fx.rate > 0) { c = c * fx.rate; sign = "¥"; }
   const s = c >= 100 ? c.toFixed(0) : c >= 1 ? c.toFixed(2) : c.toFixed(3);
@@ -16329,7 +16416,7 @@ function quotaSpan(lines, range, now) {
 // new subpath at each cycle's start; the point before x0 and the one after
 // x1 go along, so the line reaches the box's edges
 function quotaPaths(points, x0, x1, w, h) {
-  const X = (t) => ((t - x0) / (x1 - x0)) * w, Y = (v) => h - (Math.max(0, Math.min(100, v)) / 100) * h;
+  const X = (t) => ((t - x0) / (x1 - x0)) * w, Y = (v) => h - (to100(v) / 100) * h;
   let d = "", prev = null;
   for (let i = 0; i < points.length; i++) {
     const p = points[i];
@@ -16466,7 +16553,7 @@ function quotaCurve(sub) {
     pace.textContent = p ? quotaEtaText(longest, now) : "";
     // which window it is, and the instant with its year, behind a line
     // that holds day and minute and is cut short rather than wrapped
-    pace.title = p ? [shown.length > 1 ? longest.label : "", pace.textContent, p.out != null ? new Date(p.out).toLocaleString(intlLang()) : ""].filter(Boolean).join("\n") : "";
+    pace.title = p ? tipLines(shown.length > 1 ? longest.label : "", pace.textContent, p.out != null ? new Date(p.out).toLocaleString(intlLang()) : "") : "";
   };
   box.append(head, g, axis, legend);
   box.draw();
@@ -16612,7 +16699,7 @@ function sparkGap(points, start, reset, now, w, h) {
   }
   if (pts.length < 2) return null;
   const X = (at) => ((at - start) / (reset - start)) * w;
-  const Y = (v) => h - (Math.max(0, Math.min(100, v)) / 100) * h;
+  const Y = (v) => h - (to100(v) / 100) * h;
   const E = (at) => ((at - start) / (reset - start)) * h; // the even burn's y
   const a = pts[0].at, b = pts[pts.length - 1].at;
   const poly = pts.map((p) => X(p.at).toFixed(1) + "," + Y(p.left).toFixed(1))
@@ -16966,7 +17053,7 @@ function renderPanelUse() {
     none.append(el("b", "", t(panelUseProvider || panelUsePeriod !== "today" ? "No requests here" : "No requests today")), t("Every request an agent sends to magpie, and every call the agents' own session files record, is counted here."));
     out.push(none);
   } else {
-    const prompt = l.input + l.cache_write + l.cache_read;
+    const hitRate = cacheHitOf(l);
     const tot = el("div", "pu-tot");
     const blk = (label, value, sub, cls, subCls) => {
       const b = el("div", "blk");
@@ -16984,7 +17071,7 @@ function renderPanelUse() {
     blk("Requests", ledNum(l.calls), [l.errors ? t("{n} failed", { n: ledNum(l.errors) }) : t("none failed"), l.retried ? t("{n} answered on a retry", { n: ledNum(l.retried) }) : ""].filter(Boolean).join(" · "), "", l.errors ? "bad" : "");
     const c = fmtCost(l);
     blk("Cost", c ? "≈" + c : "—", l.unpriced ? t("{n} unpriced", { n: l.unpriced }) : t("effective prices"), c ? "cost" : "");
-    blk("Cache hit rate", prompt ? Math.round((100 * l.cache_read) / prompt) + "%" : "—", t("of the prompt"));
+    blk("Cache hit rate", hitRate === null ? "—" : Math.round(100 * hitRate) + "%", cacheLeftOut(l) || t("of the prompt"));
     const card = el("div", "pu-card");
     const head = el("div", "led-bar");
     const met = el("div", "segs");
@@ -17063,7 +17150,8 @@ function renderPanelQuota(lazy) {
   const restoreFlash = keepQuotaFlash(box);
   box.replaceChildren();
   if (none) { quotaFocus = ""; panelArranging = false; fit(); return; }
-  if (!quotas) {
+  // kept cards wait for a state to say which are hidden
+  if (!quotas || (quotasKept && !(load.done || state.last))) {
     for (let i = 0; i < 2; i++) {
       const card = el("div", "pq-card");
       card.append(el("span", "skeleton sk-aq"), el("span", "skeleton sk-ring"));
@@ -17294,9 +17382,7 @@ function panelQuotaCard(q) {
   card.title = [q.name, q.alias, q.user, q.seat && q.seat !== q.alias && "≡ " + q.seat, q.plan, q.until ? planTerm(q) : "", q.balance && t("Balance") + " " + q.balance].filter(Boolean).join(" · ");
   if (q.error) {
     card.classList.add("err");
-    const why = el("span", "pq-sub err", quotaError(q.error, q));
-    why.append(quotaRefresh(q));
-    card.append(why);
+    card.append(pqLine(quotaError(q.error, q), q, " err"));
     card.title += "\n" + q.error;
     return card;
   }
@@ -17305,19 +17391,19 @@ function panelQuotaCard(q) {
     card.title += "\n" + asOfText(q);
   }
   const balance = q.balance && balanceRow(q, "What is left on the account besides its windows", false);
-  // a pool's 5-hour and weekly rings, two pools of them, else three
-  const fam = familyWindows(q.windows.filter((w) => !w.unlimited));
-  if (!fam.length && q.windows.some((w) => w.unlimited)) {
-    const sub = el("span", "pq-sub", t("Unlimited"));
-    sub.append(quotaRefresh(q));
-    card.append(sub);
+  // a pool's 5-hour and weekly rings, every pool's (a third pool once left
+  // Claude's out: 01huadalang on Discord), else three
+  const fam = familyWindows(q.windows.filter((w) => !w.unlimited && !w.text));
+  const tx = q.windows.filter((w) => w.text).map((w) => t(w.name) + " " + w.display).join(" · ");
+  if (!fam.length && (tx || q.windows.some((w) => w.unlimited))) {
+    card.append(pqLine(tx || t("Unlimited"), q));
     if (balance) card.append(balance);
     return card;
   }
-  const ws = fam.slice(0, fam.some((w) => w.members) ? 4 : 3);
+  const ws = fam.slice(0, fam.some((w) => w.members) ? Math.max(4, fam.filter((w) => w.members).length) : 3);
   // when the windows begun start again: the first bare, the others by name
   const begun = ws.filter((w) => w.resetsAt && w.used > 0);
-  const sub = el("span", "pq-sub", begun.length
+  const say = el("span", "pq-say", begun.length
     ? begun.map((w, i) => {
       const at = new Date(w.resetsAt);
       // the first deadline named as one: a bare "↻ 14:26" read as a
@@ -17334,13 +17420,11 @@ function panelQuotaCard(q) {
   // it would read as the week's.
   const line = quotaRange !== "off" && begun.length === 1 && begun[0] === ws[0] && !ws[0].tiers ? quotaWindowLine(q, ws[0]) : null;
   const pace = line ? quotaEtaText(line, Date.now()) : "";
-  if (pace) sub.append(el("span", "pq-pace", " · " + pace));
-  // the card's own refresh, as on the Usage page: shown as it's hovered
-  sub.append(quotaRefresh(q));
-  card.append(sub);
-  const rings = el("span", "pq-rings");
+  if (pace) say.append(el("span", "pq-pace", " · " + pace));
+  card.append(pqLine(say, q));
+  const rings = el("span", "pq-rings" + (ws.length > 4 ? " many" : ""));
   for (const w of ws) {
-    const used = Math.max(0, Math.min(100, w.used));
+    const used = to100(w.used);
     const r = el("span", "pq-ring" + (used >= 90 ? " full" : ""));
     const dial = el("span", "pq-dial");
     dial.style.setProperty("--p", quotaFill(w));
@@ -17349,7 +17433,7 @@ function panelQuotaCard(q) {
     const rn = el("span", "pq-rn", w.window ? undefined : ringName(w));
     if (w.window) {
       rn.classList.add("pq-rn2");
-      rn.append(el("span", "", w.pool.split(/[ &]/)[0]), el("span", "", shortWindow(w.window)));
+      rn.append(el("span", "", poolWord(w.pool)), el("span", "", shortWindow(w.window)));
     }
     r.append(dial, rn);
     r.title = t(w.name) + " · " + quotaText(w) + (w.resetsAt ? "\n" + resetText(new Date(w.resetsAt), new Date(w.resetsAt).toLocaleString(intlLang())) + (new Date(w.resetsAt) > Date.now() ? " · " + untilText(new Date(w.resetsAt)) : "") : "")
@@ -18030,7 +18114,7 @@ function balanceShown(q) {
 
 // balanceMeter: a balance field's percent, as a meter.
 function balanceMeter(percent) {
-  const share = Math.max(0, Math.min(100, percent));
+  const share = to100(percent);
   const track = el("div", "quota-track" + (share >= 90 ? " full" : ""));
   const fill = el("i");
   fill.style.width = share + "%";
@@ -18084,12 +18168,19 @@ function keepQuotaRefresh(box) {
     requestAnimationFrame(() => { for (const b of shown) b.classList.remove("kept"); });
   };
 }
+// a tray line, its refresh kept (#3569)
+function pqLine(say, q, c = "") {
+  const l = el("span", "pq-sub pq-line" + c);
+  l.append(say.nodeType ? say : el("span", "pq-say", say), quotaRefresh(q));
+  return l;
+}
 function quotaRefresh(q) {
   const key = usageAcctKey(q);
   // only one its redraw took out: the panel and Usage page each draw it
   const kept = [quotaRefreshing.get(key)?.button, keptQuotaRefresh?.get(key)].find((k) => k && !k.isConnected);
   const b = kept || el("button", "quota-refresh");
   if (quotaRefreshing.has(key) && b !== quotaRefreshing.get(key).button) b.classList.add("busy", "spun");
+  b.classList.toggle("reading", quotasKept);
   b.dataset.key = key;
   b.type = "button";
   b.title = t(q.provider === "claude" ? "Read this card again, by running Claude Code's own /usage" : "Read this card again");
@@ -18296,7 +18387,7 @@ function quotaWindows(sub) {
     if (w.historyMissing) track.style.visibility = "hidden";
     track.append(fill);
     quota.append(labels);
-    if (!w.unlimited) quota.append(track);
+    if (!w.unlimited && !w.text) quota.append(track);
     // when it starts again, on the clock and how long until then
     let r = null;
     if (w.resetsAt) {
@@ -18320,7 +18411,7 @@ function quotaWindows(sub) {
       if (!r) quota.append(r = el("div", "quota-reset"));
       else r.append(" · ");
       r.append(el("span", "", out + " ·"), " ", el("span", "", untilText(new Date(w.runsOutAt))));
-      quota.title = [quota.title, runsOutText(w, (at) => at.toLocaleString(intlLang()))].filter(Boolean).join("\n");
+      quota.title = tipLines(quota.title, runsOutText(w, (at) => at.toLocaleString(intlLang())));
     }
     // what the whole window holds, by what magpie routed in it (Chiao), on
     // the reset's line, so the window keeps its three rows
@@ -18341,7 +18432,7 @@ function quotaWindows(sub) {
     // a model family's figure: its models, level by level, in its tooltip
     if (w.tiers) quota.title = t("{family}: the most used of its models", { family: w.name }) + "\n" + tiersText(w);
     // a pool's: when it starts again, and the models it counts
-    if (w.members) quota.title = [quota.title, poolTip(w)].filter(Boolean).join("\n");
+    if (w.members) quota.title = tipLines(quota.title, poolTip(w));
     windows.append(quota);
   }
   quotaFit.observe(windows);
@@ -18385,6 +18476,16 @@ function ledMoney(v) {
 const LED_METRICS = [["tokens", "Tokens"], ["cost", "Cost"], ["calls", "Requests"]];
 const LED_SHOWN = 7; // told apart in a chart; the rest are "Other"
 const allTokens = (x) => x.input + x.output + x.cache_read + x.cache_write;
+// a total's cache hit rate, leaving out cache_unknown (calls whose vendor
+// counts no cache); null when nothing is left (#3464)
+const cacheHitOf = (x) => {
+  const prompt = (x.input || 0) + (x.cache_read || 0) + (x.cache_write || 0) - (x.cache_unknown || 0);
+  return prompt > 0 ? (x.cache_read || 0) / prompt : null;
+};
+// what a hit rate leaves out, when it leaves anything out
+const cacheLeftOut = (x) => x.cache_unknown_calls
+  ? t(x.cache_unknown_calls === 1 ? "{n} request left out: its vendor doesn't count the cache" : "{n} requests left out: their vendor doesn't count the cache", { n: ledNum(x.cache_unknown_calls) })
+  : "";
 // how fast the timed replies of a point, a share or a part wrote, in tokens
 // a second after their first (usage.Totals.Speed): 0 for none timed
 const ledSpeed = (x) => x?.decode_ms > 0 ? (1000 * x.decode_out) / x.decode_ms : 0;
@@ -18419,7 +18520,7 @@ function ledGroupSpeed(x) {
   const [a, b] = measured && floor && kf > kv ? [floor, measured] : [measured || floor, measured && floor];
   const say = (p) => p.count ? p.head + " · " + p.count : p.head;
   const main = say(a), other = b ? say(b) : "";
-  return { v: a.s, text: other ? t("{a}; {b}", { a: main, b: other }) : main, main, mainParts: a.count ? [a.head, " " + a.count] : [a.head], other, title: [a.title, b?.title].filter(Boolean).join("\n") };
+  return { v: a.s, text: other ? t("{a}; {b}", { a: main, b: other }) : main, main, mainParts: a.count ? [a.head, " " + a.count] : [a.head], other, title: tipLines(a.title, b?.title) };
 }
 // their mean wait for the first token, 0 for none
 const ledTTFT = (x) => x?.timed > 0 ? x.ttft_ms / x.timed : 0;
@@ -18676,8 +18777,8 @@ function drawLedRank(box, l, split, metric, picked, choose, compact) {
     // how fast its replies came, beside what they cost (#860)
     if (metric !== "speed" && gs) more.push(Object.assign(el("span", "rk-speed", gs.text), { title: gs.title }));
     if (ledTTFT(x)) more.push(t("TTFT {ms}", { ms: ledTook(ledTTFT(x)) }));
-    const prompt = x.input + x.cache_write + x.cache_read;
-    if (prompt && !compact) more.push(t("hit rate {p}", { p: Math.round((100 * x.cache_read) / prompt) + "%" }));
+    const hit = cacheHitOf(x);
+    if (hit !== null && !compact) more.push(t("hit rate {p}", { p: Math.round(100 * hit) + "%" }));
     // a speed is no one's share of all
     if (metric !== "speed") more.push(Math.round((100 * v) / sum) + "%");
     const l2 = el("div", "rk-b");
@@ -18694,7 +18795,7 @@ function drawLedRank(box, l, split, metric, picked, choose, compact) {
   for (const x of top) box.append(one(x, x.color));
   if (rest.length) {
     const tot = rest.reduce((acc, x) => {
-      for (const k of ["calls", "errors", "loops", "input", "output", "cache_read", "cache_write", "cost", "credits", "credited", "timed", "ttft_ms", "decode_ms", "decode_out", "decode_n", "floor_out", "floor_ms", "floor_n"]) acc[k] = (acc[k] || 0) + (x[k] || 0);
+      for (const k of ["calls", "errors", "loops", "input", "output", "cache_read", "cache_write", "cache_unknown", "cache_unknown_calls", "cost", "credits", "credited", "timed", "ttft_ms", "decode_ms", "decode_out", "decode_n", "floor_out", "floor_ms", "floor_n"]) acc[k] = (acc[k] || 0) + (x[k] || 0);
       return acc;
     }, { id: "\0other", name: t("Other ({n})", { n: rest.length }) });
     box.append(one(tot, "var(--faint)", true));
@@ -19611,7 +19712,7 @@ function renderSettings() {
   // has no notes
   if (/^v?\d+\.\d+\.\d+$/.test(s.version || "")) {
     const notes = el("button", "text", t("Open"));
-    notes.onclick = async () => openWhatsNew(await api(updatePath("update")).catch(() => null), notes);
+    notes.onclick = () => openWhatsNew(notes);
     row(t("What's new"), t("The release notes since the last update"), "", notes).classList.add("whatsnew-row");
   }
   // the header's Update pill, kept away for good or for one version; the
@@ -20859,7 +20960,7 @@ function renderAlerts(s, keep) {
 // in Settings, apart from the agents they set (the owner, 10-20); Long
 // conversations is Codex's and Claude Code's both, in each one's sheet.
 const AGENT_PREFS = {
-  codex: ["codexAgentsV1Row", "fullContextRow", "codexAsyncRow", "codexTitlesRow", "codexDescriptionsRow", "codexPredictionsRow", "codexAutoReviewRow", "codexMemoriesRow"],
+  codex: ["codexAgentsV1Row", "codexSubagentModelRow", "fullContextRow", "codexAsyncRow", "codexTitlesRow", "codexDescriptionsRow", "codexPredictionsRow", "codexAutoReviewRow", "codexMemoriesRow"],
   claude: ["fullContextRow"],
 };
 const agentPrefsOf = (a) => gatewayMode ? null : AGENT_PREFS[a.id.split("@wsl:")[0]];
@@ -20966,6 +21067,7 @@ function renderAgentPrefs() {
   renderCodexPredictions(s);
   renderCodexAutoReview(s);
   renderCodexMemories();
+  renderCodexSubagentModel();
 }
 
 // renderAgentPrefLinks: Settings' search still finds the settings an agent's
@@ -20983,7 +21085,7 @@ function renderAgentPrefLinks() {
   else if (loose.parentElement === box.parentElement) $("#agentPrefRows").append(loose);
   for (const r of agentPrefRowEls) {
     const agents = state.agents.filter((a) => agentPrefsOf(a)?.includes(r.id) && !a.id.includes("@wsl:"));
-    if (!agents.length || (r.id === "codexMemoriesRow" && r.hidden)) continue;
+    if (!agents.length || ((r.id === "codexMemoriesRow" || r.id === "codexSubagentModelRow") && r.hidden)) continue;
     const row = el("div", "row pref agent-pref-link");
     const who = el("div", "who");
     const name = r.querySelector(".name");
@@ -21138,6 +21240,31 @@ function renderCodexMemories() {
   $("#codexMemoriesPick").replaceChildren(b);
 }
 
+// renderCodexSubagentModel: Codex's subagent model in its sheet, a row with
+// a name, as the memories one is: the card's square alone is easy to miss.
+// The same field and picker, so the row and the square are one setting.
+// It says its name alone, its button the choice, Same as the lead or the
+// model; what that does is the row's title.
+function renderCodexSubagentModel() {
+  homeAgentPrefRows();
+  const row = $("#codexSubagentModelRow");
+  if (!row) return;
+  const a = state.agents.find((x) => x.id === "codex");
+  const f = a?.fields?.find((x) => x.label === SUB_MODEL);
+  row.hidden = gatewayMode || !f || (!f.options.length && !f.value);
+  if (row.hidden) return;
+  const said = codexSubSaid(a, f);
+  const main = a.fields.find((x) => x.key === "model");
+  const b = el("button", "rt-cond on");
+  b.type = "button";
+  b.setAttribute("aria-label", t("Codex subagent model"));
+  b.append(icon((f.value ? optionFor(f, f.value)?.icon : main && optionFor(main, main.value)?.icon) || "generic"), el("span", "", said.name));
+  b.onclick = (ev) => openPicker(a, f, b, ev);
+  $("#codexSubagentModelPick").replaceChildren(b);
+  b.title = said.line;
+  row.querySelector(".who").title = said.line;
+}
+
 // renderImages: the model that describes images to a model that can't see
 // them — the one magpie picks, one named, or none, and then such an image
 // is turned away.
@@ -21190,17 +21317,17 @@ function renderImages(s, keep) {
   r.append(who, val);
   box.append(r);
   renderImageGen(s, keep, box);
-  // the same image recognition as an MCP server of the gateway's (JonahFu
-  // on X), for an agent to mount as its analyze_image tool
-  const mcpURL = mcpAddress(s, "/mcp/magpie/vision");
-  const mcp = el("div", "row pref");
-  const mwho = el("div", "who");
-  mwho.append(el("div", "name", t("Image recognition MCP server")), el("div", "sub", t("Agents can add image recognition as an MCP server (Streamable HTTP) with one analyze_image tool, which reads an image with the Image recognition model from a file path, a URL or a data URL. From another computer, send a gateway key as Authorization: Bearer <key> and the image as a URL or data URL.")));
-  const mval = el("div", "val");
-  mval.append(el("code", "", mcpURL), copyBtn(mcpURL, t("Address")));
-  mcp.append(mwho, mval);
-  mcp.id = "visionMcpRow";
-  box.append(mcp);
+  // both as the gateway's MCP servers, for an agent with no Library (JonahFu on X)
+  const mcpRow = (id, path, name, sub) => {
+    const url = mcpAddress(s, path), r = el("div", "row pref"), who = el("div", "who"), val = el("div", "val");
+    who.append(el("div", "name", name), el("div", "sub", sub));
+    val.append(el("code", "", url), copyBtn(url, t("Address")));
+    r.append(who, val);
+    r.id = id;
+    box.append(r);
+  };
+  mcpRow("visionMcpRow", "/mcp/magpie/vision", t("Image recognition MCP server"), t("Agents can add image recognition as an MCP server (Streamable HTTP) with one analyze_image tool, which reads an image with the Image recognition model from a file path, a URL or a data URL. From another computer, send a gateway key as Authorization: Bearer <key> and the image as a URL or data URL."));
+  mcpRow("imageMcpRow", "/mcp/magpie/image", t("Image generation MCP server"), t("Agents can add image generation as an MCP server (Streamable HTTP) with generate_image, generate_video and generation_result tools, which draw with the Image generation model. An image comes back in the answer and at a URL kept for an hour, a video at a URL; nothing is saved in the agent's project. From another computer, send a gateway key as Authorization: Bearer <key>."));
 }
 
 // renderImageGen: the model magpie's generate_image tool draws with — the
@@ -21229,7 +21356,7 @@ function renderImageGen(s, keep, box) {
   const libOff = featuresOff.has("library");
   const sub = el("div", "sub wraps",
     v === "off" ? t("Agents given Magpie Image can't generate images or videos: the tool says it is off")
-    : gatewayMode ? t("The model Magpie Image draws with, for the agents given the Magpie Image tool; images are saved in their project")
+    : gatewayMode ? t("The model the Image generation MCP server below draws with, for the agents that add it; images come back in their answer")
     : libOff ? t("The model Magpie Image draws with. Agents get the Magpie Image tool from the Library, which is turned off in Plugins › Built-in; images are saved in their project")
     : t("The model Magpie Image draws with. Agents get the Magpie Image tool from the Library; images are saved in their project"));
   who.append(el("div", "name", t("Image generation")), sub);
@@ -21617,7 +21744,7 @@ function renderSearcher(s, keep, box) {
   // the one named didn't search last time, and no other provider searched
   // in its place (Gearclickist on Discord: Grok picked answered without
   // searching, and Codex's pricier model searched instead, unasked). First,
-  // so the one-line help's ellipsis doesn't hide it.
+  // so it reads before the help.
   const failed = s.searchFailed;
   if (!off && v && !s.searchUnused && failed) {
     const why = failed.notSearched ? t("it answered without searching the web, so its account or plan may not offer web search") : failed.nothingFound ? t("its reply named no page it found") : failed.why || t("it failed");
@@ -21888,6 +22015,8 @@ function renderRedact(s, keep) {
   const onOff = (on, fn) => segs([["off", t("Off")], ["on", t("On")]], on ? "on" : "off", (v) => fn(v === "on"));
   row(t("Mask secrets"), t("API keys, private keys, tokens and passwords go to vendors as placeholders, and come back as they were"),
     onOff(s.redact, (redact) => savePrefs({ ...keep, redact })));
+  if (s.redact) row(t("Keep a key's form"), t("A key goes as a made-up one of the same form (sk_… stays sk_…), not a placeholder, and comes back as it was"),
+    onOff(s.redactShape, (redactShape) => savePrefs({ ...keep, redactShape }))).id = "redactShapeRow";
   row(t("Mask personal data"), t("Emails, phone numbers, ID and bank card numbers too"),
     onOff(s.redactPersonal, (redactPersonal) => {
       // turned on, the accounts on screen are hidden too
@@ -22028,15 +22157,12 @@ const MASK_KINDS = {
 };
 // who found a value (redact.By*)
 const MASK_BY = { rule: "Rules", yours: "Your rules", word: "Your words", model: "Local model", known: "Seen before" };
-// what a request was, beside a chat (gateway's noteMasked)
-const MASK_WHAT = { search: "Web search", image: "Image", video: "Video", decide: "System One", embeddings: "Embeddings", audio: "Audio" };
 const SHIELD = "M8 1.8 13 3.6v4.1c0 3-2.1 5.4-5 6.5-2.9-1.1-5-3.5-5-6.5V3.6Z";
 const PLACEHOLDER = /\{\{[^{}\s]{1,64}\}\}/g;
 let maskSum = null;          // the summary Insights › Masking read last: its kinds' colours
 const maskValues = new Map(); // placeholder → what it stood for, as this magpie told it
 const maskKindName = (k) => MASK_KINDS[k] ? t(MASK_KINDS[k]) : k;
 const maskByName = (b) => MASK_BY[b] ? t(MASK_BY[b]) : b;
-const stillMotion = calm;
 // a kind's colour is its place in the summary's ranking, so the bar, the
 // legend, the chips and the records say a kind in one colour
 function maskColor(k) {
@@ -22050,24 +22176,10 @@ function maskShape(head, len) {
   const rest = Math.max(1, Math.min((len || 0) - [...head].length, 8));
   return head + "•".repeat(rest);
 }
-// the providers' names, read once when Settings opened before any page
-// that loads them
-let maskProv = null, maskProvAsked = false;
-function maskWho(id, kind) {
-  const x = kind === "agent" ? state.agents?.find((a) => a.id === id) : (providers || maskProv)?.providers?.find((p) => p.id === id);
-  return { name: x?.name || id || t("Unknown"), icon: x?.icon };
-}
 function maskDot(k) {
   const d = el("span", "mo-dotc");
   d.style.background = maskColor(k);
   return d;
-}
-function maskDayName(when) {
-  const d = new Date(when), now = new Date();
-  const days = Math.round((new Date(now.toDateString()) - new Date(d.toDateString())) / 86400000);
-  if (days === 0) return t("Today");
-  if (days === 1) return t("Yesterday");
-  return d.toLocaleDateString(intlLang(), { weekday: "short", month: "short", day: "numeric" });
 }
 
 // maskValue: what placeholder p stood for, or null where this magpie no
@@ -22439,7 +22551,7 @@ function maskTryDraw(out) {
   }
   const text = el("div", "mask-try-text");
   let at = 0;
-  for (const m of res.text.matchAll(PLACEHOLDER)) {
+  for (const m of maskMatches(res.text, info)) {
     text.append(document.createTextNode(res.text.slice(at, m.index)));
     const h = info.get(m[0]);
     const kind = h?.kind || m[0].slice(2, -2).replace(/_[^_]*$/, "");
@@ -22821,9 +22933,9 @@ async function renderUpdate(r, u) {
   if (u == null) {
     const early = !updateBusy && updateLast && !r.querySelector(".sub");
     if (early) renderUpdate(r, updateLast);
-    u = await api(updatePath("update")).catch(() => null);
+    u = await api(updatePath("update?fresh=1")).catch(() => null);
     if (!u || !r.isConnected || seqOf(r) !== seq) return;
-    if (early) updateSeq.set(r, seq + 1); // stops its timers
+    if (early) updateSeq.set(r, seq + 1); // stops timers
   } else if (!r.isConnected) return;
   updateLast = u;
   const who = r.querySelector(".who"), val = r.querySelector(".val");
@@ -23097,7 +23209,7 @@ function prefsKeep(s) {
     uiFont: s.uiFont || null, codeFont: s.codeFont || null,
     otel: s.otel || {},
     trayUsages: s.trayUsages || [],
-    redact: !!s.redact, redactPersonal: !!s.redactPersonal, redactKinds: s.redactKinds || {}, redactWords: s.redactWords || [], redactWordsAnyCase: !!s.redactWordsAnyCase, codexWarmup: s.codexWarmup || "",
+    redact: !!s.redact, redactPersonal: !!s.redactPersonal, redactKinds: s.redactKinds || {}, redactWords: s.redactWords || [], redactWordsAnyCase: !!s.redactWordsAnyCase, redactShape: !!s.redactShape, codexWarmup: s.codexWarmup || "",
     claudeWarmup: s.claudeWarmup || "", codexWarmAt: s.codexWarmAt || "", claudeWarmAt: s.claudeWarmAt || "",
     codexWarmAts: warmTimes(s.codexWarmAts, s.codexWarmAt), claudeWarmAts: warmTimes(s.claudeWarmAts, s.claudeWarmAt), workbuddyCheckin: !!s.workbuddyCheckin, traeCheckin: !!s.traeCheckin, minimaxCheckin: !!s.minimaxCheckin, qoderCheckin: !!s.qoderCheckin, noStats: !!s.noStats, noUsageStats: !!s.noUsageStats,
     memberModel: !!s.memberModel, noLoopGuard: !!s.noLoopGuard, claudeLeanPrompt: !!s.claudeLeanPrompt, refusalRetries: s.refusalRetries ?? null,
@@ -23150,19 +23262,10 @@ function savePrefs(body) {
 //   anchoring), WebKit scrolls a field it focuses to the middle of the view,
 //   and code sets scrollTop.
 // - What the reader clicks stays where it is on the screen while what the
-//   click does redraws around it — the part above it grown or shrunk, the
-//   control itself drawn again, a load come in — till the reader scrolls or
-//   clicks again, or it has settled. A click is never a scroll: a tab, a
-//   filter, a day, a toggle leaves the page where it was. When what it does
-//   leaves the page shorter under it (a list emptied), the view keeps room
-//   at its foot for it to stay, room that goes as the reader scrolls back.
-//   A control under what it unrolls (data-unrolls: "Show 7 more") is the
-//   exception: it goes down with what it opens, and what's held is the
-//   part it is in, so the rows open downwards rather than the page riding
-//   up past them. A view at its top stays at its top: what comes in above
-//   the control there moves it down instead of scrolling itself out of sight,
-//   as long as that leaves it under the pointer (less than half its height);
-//   what comes in larger above it (a day's stage on Routing) is scrolled past.
+//   click does redraws around it, till they scroll or click again or it has
+//   settled: a click is never a scroll. A page left shorter under it keeps
+//   room at its foot; a data-unrolls control goes down with what it opens;
+//   a view at its top stays there (gui-shell.md, "A click never moves").
 //
 // Code moves a view only in answer to a click that asks to go somewhere, and
 // shows that with the reader's event: scrollOnPurpose(e). Called without one
@@ -23205,17 +23308,26 @@ function keyboardFocus(e) {
     if ((r.top < b.top || r.bottom > b.bottom) && scrollOnPurpose(e, 400)) focused.scrollIntoView({ block: "nearest" });
   }));
 }
-// A wheel or a touch can scroll the view before the page is told of it: the
-// browser scrolls off the main thread, and a busy page gets the scroll event
-// first and the wheel after (WebKit, a loaded Mac). That scroll was put back
-// as no one's, and the reader lost a wheel step. What was put back is kept
-// for a moment, and a wheel or touch that came in before it was put back, the
-// same way, gives it back to the reader.
-let putBack = []; // { v, by: px put back, at }, the last second's
+// A wheel or a touch can scroll the view before the page is told of it (the
+// browser scrolls off the main thread; WebKit, a loaded Mac): put back as no
+// one's, the reader lost a step. What was put back is kept a moment, and a
+// wheel or touch made before it, the same way, gives it back.
+// macOS 13's WebKit (16.6) may scroll a view under a wheel or a coast it never
+// tells the page of: every scroll was put back, the page shook and only the
+// bar's drag moved it (issenn). Three put back the same way in a second, no
+// click holding, are the reader's: given back, and so is each one after
+// that goes on the same way within a second. Code scrolls once; not a run.
+let putBack = [], run = null; // { v, by: px put back, at, h: held }, the last second's
 function puttingBack(v, from) {
-  const by = from - v.scrollTop, at = performance.now();
+  const by = from - v.scrollTop, at = performance.now(), d = Math.sign(by), h = held?.v === v;
   putBack = putBack.filter((p) => at - p.at < 1000);
-  if (Math.abs(by) >= 1) putBack.push({ v, by, at });
+  if (Math.abs(by) < 1) return;
+  putBack.push({ v, by, at, h });
+  if (h) return;
+  const mine = putBack.filter((p) => p.v === v && !p.h && Math.sign(p.by) === d);
+  if (mine.length < 3 && !(run?.v === v && run.d === d && at - run.at < 1000)) return;
+  run = { v, d, at }; putBack = putBack.filter((p) => !mine.includes(p)); flings();
+  for (const p of mine) v.scrollTop += p.by;
 }
 // Given back is what was put back after the reader's input was made (its
 // timeStamp is when it was made, not when the page was told) and went the
@@ -23228,7 +23340,7 @@ function givesBack(e, dir) {
   for (const p of back) p.v.scrollTop += p.by;
 }
 let touchY = null;
-addEventListener("wheel", (e) => { readerScrolls(250); givesBack(e, Math.sign(e.deltaY)); }, { capture: true, passive: true });
+addEventListener("wheel", (e) => { flings(); givesBack(e, Math.sign(e.deltaY)); }, { capture: true, passive: true });
 addEventListener("touchstart", (e) => { touchY = e.touches[0]?.clientY ?? null; }, { capture: true, passive: true });
 addEventListener("touchmove", (e) => {
   readerScrolls(250);
@@ -23238,10 +23350,10 @@ addEventListener("touchmove", (e) => {
   if (touchY != null) givesBack(e, Math.sign(touchY - y));
   touchY = y;
 }, { capture: true, passive: true });
-// A flick goes on scrolling after the finger is lifted, with no touch event
-// to say so: each of its scrolls keeps the next one the reader's, till it
-// comes to rest. Put back, a phone's page jerked to and fro under the
-// finger's flick (jiakun_zhao on X: 滚动会抽搐).
+// A flick goes on after the finger lifts, and a trackpad's coast after the
+// fingers do (WebKit on the Mac plays it with no wheel), with no event to say
+// so: each of their scrolls keeps the next one the reader's till it rests.
+// Put back, the page shook (jiakun_zhao on X: 滚动会抽搐; issenn: 高频振动并复位).
 let flingUntil = 0;
 const flings = () => { flingUntil = performance.now() + 250; readerScrolls(250); };
 addEventListener("touchend", flings, { capture: true, passive: true });
@@ -24361,10 +24473,10 @@ function renderCrumb(items) {
   if (on) parts.push(on.textContent.trim().split(" · ")[0]);
   c.replaceChildren(...parts.flatMap((p, i) => i ? [el("i", "", "/"), el(i === parts.length - 1 ? "b" : "span", "", p)] : [el(parts.length === 1 ? "b" : "span", "", p)]));
 }
-// the gateway at the sidebar's foot: where it listens, or that it doesn't
-var sideGwAt = null;
+// the gateway at the sidebar's foot, boot.js's until providers says (#3429)
+var sideGwAt = window.bootPrefs?.sideGateway;
 function sideGwRead() {
-  if (!(sideGwRead.due && sideNav() && !sideGwAt)) return;
+  if (!(sideGwRead.due && sideNav() && (!sideGwAt || sideGwAt.boot))) return;
   // the list is not read yet: the read the Providers page is made ready
   // with (#1519) serves both, one read, not two
   if (!providers && mode !== "panel") {
