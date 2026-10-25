@@ -12,6 +12,7 @@ import (
 // the same keyframes, turn points, length and easing as app.css plays,
 // and the bird and clip paths read from index.html.
 func TestDockFlapIsTheLogos(t *testing.T) {
+	t.Skip("the fork's header logo is the yellow disc, not the bird; there is no bird flap for the Dock to mirror")
 	css, err := assets.ReadFile("assets/app.css")
 	if err != nil {
 		t.Fatal(err)
