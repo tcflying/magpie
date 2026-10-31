@@ -30,7 +30,10 @@ import (
 // Store package by its package name and publisher id. guid is the key an
 // electron-builder installer registers the app under for the current user
 // (HKCU\Software\<guid>'s InstallLocation, and its Uninstall entry's
-// DisplayVersion): its installer lets the user pick another folder.
+// DisplayVersion): its installer lets the user pick another folder. more
+// are the app's other builds, each under a bundle id of its own (CodeBuddy's
+// China build beside its international one). linux is the folder the
+// vendor's own Linux packages install the app to.
 type desktopApp struct {
 	id        string
 	names     []string
@@ -38,10 +41,18 @@ type desktopApp struct {
 	store     string
 	publisher string
 	guid      string
+	linux     string
+	more      []desktopApp
 }
 
 var desktopApps = map[string]desktopApp{
-	"codex": {id: "com.openai.codex", names: []string{"ChatGPT.app", "Codex.app"}, store: "OpenAI.Codex", publisher: "2p2nqsd0c76g0"},
+	// On Linux OpenAI's chatgpt package (a deb, an rpm and an Arch
+	// package, in preview since 08-11) installs the app to /usr/lib/chatgpt:
+	// ChatGPT, with its codex in resources and its version in
+	// resources/linux-package-metadata.json (26.1027.30824's deb, seen in
+	// the WSL distro magpie-desktop). Its app-server reads ~/.codex, as the
+	// CLI does (pota on Discord: no account switch for it on Linux).
+	"codex": {id: "com.openai.codex", names: []string{"ChatGPT.app", "Codex.app"}, store: "OpenAI.Codex", publisher: "2p2nqsd0c76g0", linux: "/usr/lib/chatgpt"},
 	// DeepSeek Harness Desktop (0.2.0-rc.2's DeepSeek Harness.app,
 	// com.deepseek.dsh) reads ~/.dsh as the CLI does — its own profile,
 	// profiles/desktop, beside the CLI's — and needs no CLI: its terminal
@@ -53,6 +64,28 @@ var desktopApps = map[string]desktopApp{
 	// registers it under HKCU\Software\1bf39983-… (#2279, read from
 	// 0.2.0-rc.2's dsh-latest-windows-x64.exe installer script).
 	"dsh": {id: "com.deepseek.dsh", names: []string{"DeepSeek Harness.app"}, win: filepath.Join("DeepSeek Harness", "DeepSeek Harness.exe"), guid: "1bf39983-50d0-5fe0-9ef4-cece76f67c5e"},
+	// PenguinHarness's desktop app (packages/desktop's electron-builder.yml,
+	// desktop 0.2.17: appId com.prismshadow.penguinharness, productName
+	// PenguinHarness) runs its own server on the CLI's data root,
+	// ~/.penguin/data (app-identity.ts: "the release profile shares the
+	// CLI's root by design"), and needs no CLI: it links
+	// /usr/local/bin/penguin only when the user lets it (cli-install.ts),
+	// and with no such link magpie took ~/.penguin for a leftover
+	// (rankyurky_80676 on Discord: the app not detected). On Windows its
+	// assisted NSIS installer puts it under %LOCALAPPDATA%\Programs by
+	// default and lets the folder be changed; guid is the key
+	// electron-builder registers it under, the UUID v5 of the appId in its
+	// namespace, as dsh's above is of com.deepseek.dsh. Linux's deb links
+	// /usr/bin/penguin, so Bin finds it there.
+	"penguin": {id: "com.prismshadow.penguinharness", names: []string{"PenguinHarness.app"}, win: filepath.Join("PenguinHarness", "PenguinHarness.exe"), guid: "8bb9acb7-2bdc-596b-9669-7b014ab1c47f"},
+	// The CodeBuddy IDE (Tencent's VS Code fork, 4.12.2: CodeBuddy.app,
+	// com.tencent.codebuddy, from codebuddy.ai; CodeBuddy CN.app,
+	// com.tencent.codebuddycn, from codebuddy.cn) reads the CodeBuddy Code
+	// CLI's ~/.codebuddy/models.json for models of one's own (codebuddy.go)
+	// and needs no CLI. Its Windows install folder isn't known here, so on
+	// Windows only the rule that a desktop app's folder is never gone holds.
+	"codebuddy": {id: "com.tencent.codebuddy", names: []string{"CodeBuddy.app"},
+		more: []desktopApp{{id: "com.tencent.codebuddycn", names: []string{"CodeBuddy CN.app"}}}},
 }
 
 // appFolders are where apps are installed; a var so tests can point it
@@ -283,7 +316,17 @@ func (a *Agent) AppVersion() string {
 	if !ok || a.WSL != "" {
 		return ""
 	}
-	return app.version()
+	for _, b := range app.builds() {
+		if v := b.version(); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// builds are app and its other builds (more), the first one first.
+func (app desktopApp) builds() []desktopApp {
+	return append([]desktopApp{app}, app.more...)
 }
 
 // version is the version of app installed here, "" when it isn't or doesn't
@@ -301,10 +344,47 @@ func (app desktopApp) version() string {
 		return strings.TrimSpace(string(v[1]))
 	}
 	if app.store != "" {
-		return storeAppVersion(windowsStorePackages(), app.store, app.publisher)
+		if v := storeAppVersion(windowsStorePackages(), app.store, app.publisher); v != "" {
+			return v
+		}
 	}
 	if dir, v := app.registered(); dir != "" {
 		return v
+	}
+	return app.linuxVersion()
+}
+
+// linuxDir is the folder the app's Linux package installed it to, ""
+// when it isn't there. Through proc.SystemDirs, so a test binary testenv
+// isolated never reads the machine's own /usr/lib.
+func (app desktopApp) linuxDir() string {
+	if app.linux == "" {
+		return ""
+	}
+	dir := proc.SystemDirs(app.linux)[0]
+	if !isFile(filepath.Join(dir, "resources", "linux-package-metadata.json")) {
+		return ""
+	}
+	return dir
+}
+
+var linuxPackageVersionRe = regexp.MustCompile(`"version"\s*:\s*"([^"]+)"`)
+
+// linuxVersion is the version of the app's Linux package, from its
+// resources/linux-package-metadata.json ({"codexAppBrand":"chatgpt",
+// "codexBuildFlavor":"prod","version":"26.1027.30824"}); "" when it isn't
+// installed or doesn't say.
+func (app desktopApp) linuxVersion() string {
+	dir := app.linuxDir()
+	if dir == "" {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "resources", "linux-package-metadata.json"))
+	if err != nil {
+		return ""
+	}
+	if m := linuxPackageVersionRe.FindSubmatch(b); m != nil {
+		return strings.TrimSpace(string(m[1]))
 	}
 	return ""
 }
@@ -362,15 +442,16 @@ func storeAppVersion(packages []string, name, publisher string) string {
 
 // HasApp reports whether the agent's desktop app is installed here: its
 // bundle on macOS (AppVersion), its executable on Windows: under
-// %LOCALAPPDATA%\Programs, or in the folder its installer registered.
+// %LOCALAPPDATA%\Programs, or in the folder its installer registered; on
+// Linux the folder its package installed (desktopApp.linux).
 func (a *Agent) HasApp() bool {
 	app, ok := desktopApps[a.ID]
-	return ok && a.WSL == "" && app.installed()
+	return ok && a.WSL == "" && slices.ContainsFunc(app.builds(), desktopApp.installed)
 }
 
 // installed reports whether app is installed on this machine (see HasApp).
 func (app desktopApp) installed() bool {
-	if app.version() != "" {
+	if app.version() != "" || app.linuxDir() != "" {
 		return true
 	}
 	if app.win == "" {

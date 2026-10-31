@@ -11,6 +11,7 @@ package gateway
 import (
 	"context"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -30,6 +31,20 @@ import (
 const traceKeep = 60
 
 // Route is one request's way through routing.
+// ModelMove is a stand-in that put a request on another model than the one
+// it named: To, the model it went on (before a routing group's pick), and
+// Why, a word the Routing page says it by. A Desktop's own call (desktopMove's
+// reasons), Claude Code's tiers (movedClaudeTier, movedClassifier), an
+// agent's configured stand-in (movedStandIn), Codex's last turn's model
+// (movedCodexTurn) and Privacy's unmasked route (movedPrivacy). Without it
+// a row read "asked for chatflowsai/claude-opus-5-5 → agentrouter" with
+// nothing to say a title, not the user's turn, was put on the chat's model
+// (Neo on Discord).
+type ModelMove struct {
+	To  string `json:"to"`
+	Why string `json:"why"`
+}
+
 type Route struct {
 	// callerKey: the gateway key the request came with, so a key held to
 	// a budget, models or accounts is told the routes of its own requests
@@ -70,6 +85,10 @@ type Route struct {
 	// Subagent is a Codex or Claude Desktop subagent's request put on
 	// the model set for its subagents, or kept on the one asked for and why
 	Subagent *SubagentPick `json:"subagent,omitempty"`
+	// Moved: the request was served on another model than Model names,
+	// by one of magpie's stand-ins, and why (ModelMove); nil when it went
+	// where it asked, or to a routing group by its name
+	Moved *ModelMove `json:"moved,omitempty"`
 	// Sub: the Claude Code subagent the request is of (subagentOf), whose
 	// session header is its conversation's; "" for the conversation's own
 	Sub string `json:"sub,omitempty"`
@@ -119,6 +138,15 @@ type Route struct {
 	Own     int64 `json:"own,omitempty"`
 	Retried int64 `json:"retried,omitempty"`
 	Queued  int64 `json:"queued,omitempty"`
+	// Phase: "redact" while it is being masked and not yet done
+	// (noteRedacting), so its row says masking rather than routing;
+	// Masking: the ms of Own that went on masking it, all of it when Own
+	// is unknown (maskingMs)
+	Phase   string `json:"phase,omitempty"`
+	Masking int64  `json:"masking,omitempty"`
+	// Held: the file name, in HeldDir, of the report saved of a request
+	// magpie held too long before routing it and stopped (giveUp)
+	Held string `json:"held,omitempty"`
 	// Served: the model the reply says answered, as the last try has it;
 	// Swapped: another than the one that try asked for; Routed: that try
 	// asked another magpie's routing group, and Served is its member
@@ -210,7 +238,7 @@ func groupRef(g provider.Group, ms []provider.Member) *GroupRef {
 	ref := &GroupRef{ID: g.ID, Ref: g.Ref(), Name: g.Name, Routing: g.Routing, Affinity: g.Affinity, Auto: g.Auto, Sink: sinks(g.Sink, g.Routing)}
 	seen := map[string]bool{}
 	for _, m := range ms {
-		ref.Members = append(ref.Members, provider.WithMemberEffort(m.Provider.ID+"/"+m.Model, m.Effort))
+		ref.Members = append(ref.Members, m.Spelled())
 		if m.Fast {
 			ref.Fast = append(ref.Fast, ref.Members[len(ref.Members)-1])
 		}
@@ -228,6 +256,16 @@ func groupRef(g provider.Group, ms []provider.Member) *GroupRef {
 		ref.Via = nil
 	}
 	return ref
+}
+
+// SeatPrice is what a weighed one's model costs on it at the request's
+// time, as Cheapest first went by it: a million tokens each, in the
+// catalog's dollars, Peak when that is its vendor's peak-hour price.
+type SeatPrice struct {
+	Input     float64 `json:"input"`
+	Output    float64 `json:"output"`
+	CacheRead float64 `json:"cacheRead,omitempty"`
+	Peak      bool    `json:"peak,omitempty"`
 }
 
 // Weighed is one account or key as routing weighed it.
@@ -252,19 +290,29 @@ type Weighed struct {
 	Used     float64 `json:"used"`             // share of the allowance counting the model, used
 	// Amount of Limit in Unit: the count that share is of, when the
 	// vendor counts it so (WorkBuddy's credits, #659)
-	Amount   float64           `json:"amount,omitempty"`
-	Limit    float64           `json:"limit,omitempty"`
-	Unit     string            `json:"unit,omitempty"`
-	Renews   []time.Time       `json:"renews,omitempty"` // when those windows renew, the biggest first
-	Pace     float64           `json:"pace,omitempty"`   // remaining allowance per hour until its window resets
-	Due      *time.Time        `json:"due,omitempty"`    // when the allowance window used for pace resets
-	Tokens   float64           `json:"tokens,omitempty"` // least used: tokens it served lately
-	Free     bool              `json:"free,omitempty"`   // its model costs nothing there (free first)
-	Turn     bool              `json:"turn,omitempty"`   // in turn: it was this one's turn
-	Fit      int               `json:"fit,omitempty"`    // keyFit
-	Speaks   provider.Protocol `json:"speaks,omitempty"` // a key made for one protocol only
-	Rest     *Rest             `json:"rest,omitempty"`   // resting after a failure, when the request came
+	Amount float64 `json:"amount,omitempty"`
+	Limit  float64 `json:"limit,omitempty"`
+	Unit   string  `json:"unit,omitempty"`
+	// Balance is a prepaid wallet's left in Unit (left.bal, #3950): the
+	// Routing page tells the figure, not a share
+	Balance  *float64          `json:"balance,omitempty"`
+	Renews   []time.Time       `json:"renews,omitempty"`   // when those windows renew, the biggest first
+	Pace     float64           `json:"pace,omitempty"`     // remaining allowance per hour until its window resets
+	Due      *time.Time        `json:"due,omitempty"`      // when the allowance window used for pace resets
+	Tokens   float64           `json:"tokens,omitempty"`   // least used: tokens it served lately
+	Free     bool              `json:"free,omitempty"`     // its model costs nothing there (free first)
+	LateTTFT float64           `json:"lateTtft,omitempty"` // speed first: its ms to the first token lately, 0 if not measured (speed.go)
+	LateTPS  float64           `json:"lateTps,omitempty"`  // speed first: its tokens a second lately, 0 if not told
+	Price    *SeatPrice        `json:"price,omitempty"`    // cheapest first: what its model costs on it now, nil if not known
+	Turn     bool              `json:"turn,omitempty"`     // in turn: it was this one's turn
+	Fit      int               `json:"fit,omitempty"`      // keyFit
+	Speaks   provider.Protocol `json:"speaks,omitempty"`   // a key made for one protocol only
+	Rest     *Rest             `json:"rest,omitempty"`     // resting after a failure, when the request came
 	Unlisted bool              `json:"unlisted,omitempty"`
+	// Window: left out as the request is longer than this, its model's
+	// context window (roomy), unless every one with room is out of its
+	// allowance (#3749)
+	Window int `json:"window,omitempty"`
 	// DueBy: "reset" when Due is when an auto-used Codex reset about to
 	// run out starts the windows again, sooner than they renew (#717)
 	DueBy string `json:"dueBy,omitempty"`
@@ -285,6 +333,10 @@ type Weighed struct {
 	// NoCredits: held at 100% (Capped), a Codex account the user set not
 	// to spend its credits once its allowance is used up
 	NoCredits bool `json:"noCredits,omitempty"`
+	// Unread: held (Capped) by a careful provider as its usage can't be
+	// told, why: not read yet, the read failed, or too old near its cap
+	// (provider.Provider.CapCareful)
+	Unread string `json:"unread,omitempty"`
 	// Credits: a Codex account that goes on past its allowance on its
 	// credits, and is let spend them: all but used up, it still answers,
 	// and goes before those used up with nothing to go on with
@@ -333,6 +385,10 @@ type Try struct {
 	// first text, when it streamed any (#196)
 	TTFT      int64 `json:"ttft,omitempty"`
 	FirstText int64 `json:"firstText,omitempty"`
+	// SentBy: what sent its request to the vendor when magpie's own
+	// client didn't, so it has no Net and the Routing page says why
+	// (sentBy)
+	SentBy string `json:"sentBy,omitempty"`
 	// FirstReasoning is the start of paced visible reasoning, absent for hidden reasoning.
 	FirstReasoning  int64 `json:"firstReasoning,omitempty"`
 	ReasoningHidden bool  `json:"reasoningHidden,omitempty"`
@@ -450,6 +506,10 @@ func weighed(c candidate, p provider.Provider, wg weighing, fallback bool, from 
 		if l.of > 0 {
 			w.Amount, w.Limit, w.Unit = l.amount, l.of, l.unit
 		}
+		if l.balIn != "" {
+			b := l.bal
+			w.Balance, w.Unit = &b, l.balUnit
+		}
 		if !l.due.IsZero() {
 			due := l.due
 			w.Due = &due
@@ -468,6 +528,12 @@ func weighed(c candidate, p provider.Provider, wg weighing, fallback bool, from 
 	}
 	if wg.free != nil {
 		w.Free = wg.free[c.rest]
+	}
+	if sp, ok := wg.speed[c.restID()]; ok {
+		w.LateTTFT, w.LateTPS = math.Round(sp[0]), math.Round(sp[1]*10)/10
+	}
+	if pr, ok := wg.price[c.restID()]; ok {
+		w.Price = &SeatPrice{Input: pr.in, Output: pr.out, CacheRead: pr.cache, Peak: pr.peak}
 	}
 	if sinks(p.Sink, p.Routing) {
 		markSunk(&w, c)

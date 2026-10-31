@@ -54,11 +54,29 @@ func withTypes(body []byte, ins []typeInsert) []byte {
 		}
 		start := last + 1
 		out.Write(body[start : in.at+1])
-		out.WriteString(`"type":` + in.typ + `,`)
+		out.WriteString(`"type":` + in.typ)
+		if !emptyObjectAt(body, in.at) {
+			out.WriteByte(',')
+		}
 		last = in.at
 	}
 	out.Write(body[last+1:])
 	return out.Bytes()
+}
+
+// emptyObjectAt is whether the object opening at body[at] is {}, spaces
+// aside: a type written into it has nothing after it to be parted from.
+func emptyObjectAt(body []byte, at int) bool {
+	for i := at + 1; i < len(body); i++ {
+		switch body[i] {
+		case ' ', '\t', '\n', '\r':
+			continue
+		case '}':
+			return true
+		}
+		return false
+	}
+	return false
 }
 
 // isKimi is whether p is served by Moonshot: the Kimi platform's API or a
@@ -178,18 +196,21 @@ func valuesType(vals []gjson.Result) string {
 
 // kimiLockedSampling is body without temperature and top_p when the model's
 // server locks them to one value: since kimi-k2.5 every kimi-kX.Y on both
-// Kimi platforms (Moonshot's API and a Kimi Code membership's), and Kimi
-// Code's own kimi-for-coding and k3*. A client that sends its own
-// defaults — VS Code Copilot's chat sends temperature 0.1 and top_p 1 — is
-// refused 400 "invalid temperature: only 1 is allowed for this model"
-// before any token is read (a K2.5/K2.6 with thinking off takes only 0.6),
-// and the whole request fails. Left out, the server fills in the value the
-// model and mode want, so no number is written here. Models that take a
-// range — moonshot-v1-*, kimi-k2-0905-preview, kimi-k2-thinking,
-// kimi-latest — keep what the user set, as does anyone not served by
-// Moonshot.
+// Kimi platforms (Moonshot's API and a Kimi Code membership's), Kimi
+// Code's own kimi-for-coding and k3*, and the same models on Volcengine
+// Ark, whose coding plan serves kimi-kX.Y behind hosts the preset's plans
+// and a provider added by hand both reach (#4495: 400 "Volcengine Ark:
+// `temperature` only 1 is allowed for this model"). A client that sends
+// its own defaults — VS Code Copilot's chat sends temperature 0.1 and
+// top_p 1 — is refused 400 "invalid temperature: only 1 is allowed for
+// this model" before any token is read (a K2.5/K2.6 with thinking off
+// takes only 0.6), and the whole request fails. Left out, the server
+// fills in the value the model and mode want, so no number is written
+// here. Models that take a range — moonshot-v1-*, kimi-k2-0905-preview,
+// kimi-k2-thinking, kimi-latest — keep what the user set, as does anyone
+// not served by Moonshot or Ark.
 func kimiLockedSampling(p provider.Provider, to provider.Protocol, body []byte) []byte {
-	if !isKimi(p, to) {
+	if !isKimi(p, to) && !isArk(p) {
 		return body
 	}
 	if !kimiLockedSamplingModel(gjson.GetBytes(body, "model").String()) {
@@ -477,6 +498,19 @@ func schemaTypes(root, s gjson.Result, depth int) map[string]bool {
 			return ts
 		}
 	}
+	t := keywordType(s)
+	if t == "" {
+		return nil
+	}
+	ts[t] = true
+	return ts
+}
+
+// keywordType is the type schema s's keywords say (properties: object,
+// items: array, pattern: string, minimum: number), "" when they say none.
+// An object's or an array's keywords come first: they hold schemas of
+// their own, which a validator reads only under that type.
+func keywordType(s gjson.Result) string {
 	has := func(keys ...string) bool {
 		for _, k := range keys {
 			if s.Get(k).Exists() {
@@ -487,15 +521,13 @@ func schemaTypes(root, s gjson.Result, depth int) map[string]bool {
 	}
 	switch {
 	case has("properties", "required", "additionalProperties", "patternProperties", "minProperties", "maxProperties", "propertyNames", "dependentRequired", "dependentSchemas", "unevaluatedProperties"):
-		ts["object"] = true
+		return "object"
 	case has("items", "prefixItems", "minItems", "maxItems", "uniqueItems", "contains", "unevaluatedItems"):
-		ts["array"] = true
+		return "array"
 	case has("minLength", "maxLength", "pattern", "format", "contentEncoding", "contentMediaType"):
-		ts["string"] = true
+		return "string"
 	case has("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"):
-		ts["number"] = true
-	default:
-		return nil
+		return "number"
 	}
-	return ts
+	return ""
 }

@@ -68,12 +68,26 @@ import (
 // gateway counted the hit, but an agent on pi-ai (DeepSeek Harness), which
 // reads prompt_tokens_details.cached_tokens first, showed none.
 //
+// And a call whose first fragment names no function in a JSON string —
+// no name, null, another kind — is dropped, its later fragments with it,
+// and a finish of tool_calls with no call left ends stop (#1475): a
+// client that checks the shape of every frame refuses the chunk for it
+// and the whole reply with it, the turn not retryable and the call
+// already in the history, so the session is dead — while the gateway's
+// own log says the reply went (AricRedemption). A nameless call runs
+// nowhere, so it is no call, as a written block naming no offered tool
+// is; a name of another kind on a later fragment is left out, the first
+// one's kept.
+//
 // Lines pass whole, as they came, unless one has any of them.
 type chatTidy struct {
 	buf     []byte
 	ids     streamCallIDs
 	indexes streamCallIndexes
-	called  map[int]bool // the choices that made a call
+	called  map[int]bool    // the choices that made a call
+	named   map[int]bool    // the choices with a call whose name a client reads
+	seen    map[[2]int]bool // the streamed calls, to know a first fragment
+	bad     map[[2]int]bool // the calls naming no function, with their later fragments
 }
 
 var (
@@ -273,29 +287,55 @@ func (t *chatTidy) line(line []byte) []byte {
 				calls, delta["tool_calls"] = given, given
 				inDelta = true
 			}
-			if t.ids == nil {
-				t.ids = streamCallIDs{}
-			}
 			if t.called == nil {
 				t.called = map[int]bool{}
 			}
 			t.called[choice] = true
-			if mended, chg := t.ids.mend(choice, calls); chg {
-				calls, delta["tool_calls"] = mended, mended
+			if kept, chg := t.nameless(choice, calls); chg {
+				if kept == nil {
+					delete(delta, "tool_calls")
+					// the fragments went with the drop: none is left for the
+					// id mend to give an id to, or the dropped call would
+					// come back as one with a fresh id and no name (#1475)
+					calls = nil
+				} else {
+					calls, delta["tool_calls"] = kept, kept
+				}
 				inDelta = true
 			}
-			if mended, chg := withoutEmptyNames(calls); chg {
-				delta["tool_calls"] = mended
-				inDelta = true
+			if calls != nil {
+				if t.ids == nil {
+					t.ids = streamCallIDs{}
+				}
+				if mended, chg := t.ids.mend(choice, calls); chg {
+					calls, delta["tool_calls"] = mended, mended
+					inDelta = true
+				}
+				if mended, chg := withoutEmptyNames(calls); chg {
+					delta["tool_calls"] = mended
+					inDelta = true
+				}
 			}
 		}
 		if inDelta {
 			c["delta"], _ = json.Marshal(delta)
 			changed = true
 		}
-		if t.called[choice] && string(bytes.TrimSpace(c["finish_reason"])) == `"stop"` {
-			c["finish_reason"] = json.RawMessage(`"tool_calls"`)
-			changed = true
+		if t.called[choice] {
+			switch end := string(bytes.TrimSpace(c["finish_reason"])); end {
+			case `"stop"`:
+				if t.named[choice] {
+					c["finish_reason"] = json.RawMessage(`"tool_calls"`)
+					changed = true
+				}
+			case `"tool_calls"`:
+				if !t.named[choice] {
+					// the call the finish named named no function: it ends
+					// stop, as a reply that made no call (#1475)
+					c["finish_reason"] = json.RawMessage(`"stop"`)
+					changed = true
+				}
+			}
 		}
 	}
 	if !changed && !usageMended {
@@ -395,6 +435,83 @@ func (s streamCallIndexes) give(choice int, raw json.RawMessage) (json.RawMessag
 		return raw, false
 	}
 	out, err := json.Marshal(calls)
+	if err != nil {
+		return raw, false
+	}
+	return out, true
+}
+
+// nameless drops the fragments of a streamed call whose first one names
+// no function in a JSON string — no name, null, another kind — with the
+// later fragments of the same call (#1475): a client that checks the
+// shape of every frame refuses the chunk for it and the whole reply with
+// it, the turn not retryable and the call already in the history, so the
+// session is dead. A nameless call runs nowhere, so it is no call, as a
+// written block naming no offered tool is. A name of another kind on a
+// later fragment only loses the field, the first one's kept. It reports
+// the fragments kept, nil when none, and whether any was dropped.
+func (t *chatTidy) nameless(choice int, raw json.RawMessage) (json.RawMessage, bool) {
+	var calls []map[string]json.RawMessage
+	if decodeJSON(raw, &calls) != nil {
+		return raw, false
+	}
+	var kept []map[string]json.RawMessage
+	changed := false
+	for _, call := range calls {
+		idx := 0
+		decodeJSON(call["index"], &idx)
+		key := [2]int{choice, idx}
+		if t.bad[key] {
+			changed = true
+			continue
+		}
+		first := !t.seen[key]
+		if t.seen == nil {
+			t.seen = map[[2]int]bool{}
+		}
+		t.seen[key] = true
+		var fn map[string]json.RawMessage
+		var name json.RawMessage
+		var has bool
+		if decodeJSON(call["function"], &fn) == nil {
+			name, has = fn["name"]
+		}
+		switch {
+		case has && aName(name):
+			if t.named == nil {
+				t.named = map[int]bool{}
+			}
+			t.named[choice] = true
+			kept = append(kept, call)
+		case has && !first:
+			// it would write itself over the name the first fragment
+			// carried, as an empty one would
+			delete(fn, "name")
+			call["function"], _ = json.Marshal(fn)
+			kept = append(kept, call)
+			changed = true
+		default:
+			if !first {
+				// a later fragment: the name went with the first
+				kept = append(kept, call)
+				continue
+			}
+			// no name the client reads, and a call's name goes with its
+			// first fragment: no fragment of this call will name it
+			if t.bad == nil {
+				t.bad = map[[2]int]bool{}
+			}
+			t.bad[key] = true
+			changed = true
+		}
+	}
+	if !changed {
+		return raw, false
+	}
+	if kept == nil {
+		return nil, true
+	}
+	out, err := json.Marshal(kept)
 	if err != nil {
 		return raw, false
 	}
@@ -513,6 +630,10 @@ func (t *chatWhole) flush() []byte {
 		mended := parts && flattenContent(msg, true)
 		// a call the upstream gave no id (#2611)
 		mended = wholeCallIDs(msg) || mended
+		// a call naming no function runs nowhere and no client can read
+		// it (#1475)
+		dropped := wholeNameless(msg)
+		mended = dropped || mended
 		if wrote, called := wholeTextCalls(msg, t.names); wrote {
 			if called {
 				c["finish_reason"] = json.RawMessage(`"tool_calls"`)
@@ -523,6 +644,12 @@ func (t *chatWhole) flush() []byte {
 		var native []json.RawMessage
 		if string(bytes.TrimSpace(c["finish_reason"])) == `"stop"` && decodeJSON(msg["tool_calls"], &native) == nil && len(native) > 0 {
 			c["finish_reason"] = json.RawMessage(`"tool_calls"`)
+			changed = true
+		}
+		// the call the finish named naming no function, it ends stop, as a
+		// reply that made no call (#1475)
+		if dropped && string(bytes.TrimSpace(c["finish_reason"])) == `"tool_calls"` && !wholeNamedCall(msg) {
+			c["finish_reason"] = json.RawMessage(`"stop"`)
 			changed = true
 		}
 		if !mended {
@@ -592,10 +719,11 @@ const noReasoning = " "
 // reasoning_content one: the thinking it sent back in another field
 // (reasoning, reasoning_details), else noReasoning. DeepSeek turns away a
 // reply after a tool result with none as it does a call (checked against
-// api.deepseek.com on 2026-10-12, #1822). A message with reasoning_content
-// of its own keeps it, any other reply is left as it is (DeepSeek doesn't
-// ask for its thinking), and a body with no tool calls comes back byte for
-// byte.
+// api.deepseek.com on 2026-10-12, #1822). Thinking taken from reasoning
+// goes in reasoning_content alone (asReasoningContent). A message with
+// reasoning_content of its own keeps it, any other reply is left as it is
+// (DeepSeek doesn't ask for its thinking), and a body with no tool calls
+// comes back byte for byte.
 func withReasoningOnToolTurns(body []byte) []byte {
 	afterTool := false
 	return editMessages(body, []string{"tool_calls"}, func(m map[string]json.RawMessage) bool {
@@ -622,9 +750,22 @@ func withReasoningOnToolTurns(body []byte) []byte {
 		if think == "" {
 			think = noReasoning
 		}
-		m["reasoning_content"], _ = marshalPlain(think)
+		asReasoningContent(m, think)
 		return true
 	})
+}
+
+// asReasoningContent puts think in a message's reasoning_content and
+// leaves its reasoning out: a server that reads the two as one field (a
+// self-hosted DeepSeek, as pi sends its thinking back in reasoning) turns
+// a message with both away as "duplicate field reasoning", so the thinking
+// goes once. reasoning_details stays: it is a list of typed entries, not
+// another name for the text, and can hold what the text can't (an
+// encrypted entry, a signature); an upstream that refuses it has it taken
+// out (reasoningDetailsAsContent, withoutMessageReasoning).
+func asReasoningContent(m map[string]json.RawMessage, think string) {
+	m["reasoning_content"], _ = marshalPlain(think)
+	delete(m, "reasoning")
 }
 
 // silentAssistantsOut is withoutSilentAssistants for a Chat request
@@ -747,7 +888,7 @@ func reasoningDetailsAsContent(body []byte) []byte {
 		var own string
 		if decodeJSON(m["reasoning_content"], &own) != nil || own == "" {
 			if think := reasoningText(m); think != "" {
-				m["reasoning_content"], _ = marshalPlain(think)
+				asReasoningContent(m, think)
 			}
 		}
 		delete(m, "reasoning_details")
@@ -862,4 +1003,145 @@ func mistralThinking(body []byte) []byte {
 		m["content"], _ = marshalPlain(parts)
 		return true
 	})
+}
+
+// toolPairsOut is pairToolMessages for a Chat request relayed as the
+// client sent it. Kimi's Chat API, like OpenAI's, turns the whole request
+// away when its tool exchange doesn't pair: a call with no tool message
+// answering it ("an assistant message with 'tool_calls' must be followed
+// by tool messages responding to each 'tool_call_id'. The following
+// tool_call_ids did not have response messages: …"), and a tool message
+// with no call before it ("tool_call_id  is not found"), both checked
+// against api.kimi.com/coding on 2026-10-26. A Chat agent's history holds
+// such a turn after a fork at an earlier turn, a reply stopped with its
+// call out, or a call split over two assistant messages, and every later
+// request of the conversation was refused (Paidaixinbao on X, Qoder on
+// Kimi Code). The translations had it mended (#554); the relay sent it
+// as it came. A turn's calls split over consecutive assistant messages
+// join into one first, as joinSplitCalls does for the translations. A
+// body whose exchange pairs comes back byte for byte.
+func toolPairsOut(body []byte) []byte {
+	if !bytes.Contains(body, []byte(`"tool`)) {
+		return body
+	}
+	var q map[string]json.RawMessage
+	if decodeJSON(body, &q) != nil {
+		return body
+	}
+	dec := json.NewDecoder(bytes.NewReader(q["messages"]))
+	dec.UseNumber()
+	var msgs []map[string]any
+	if dec.Decode(&msgs) != nil {
+		return body
+	}
+	for _, m := range msgs {
+		if m == nil {
+			return body
+		}
+		raw, ok := m["tool_calls"]
+		if !ok || raw == nil {
+			continue
+		}
+		list, ok := raw.([]any)
+		if !ok {
+			return body
+		}
+		calls := make([]map[string]any, 0, len(list))
+		for _, c := range list {
+			cm, ok := c.(map[string]any)
+			if !ok {
+				return body
+			}
+			calls = append(calls, cm)
+		}
+		m["tool_calls"] = calls
+	}
+	if toolsPaired(msgs) {
+		return body
+	}
+	q["messages"], _ = marshalPlain(pairToolMessages(joinSplitChatCalls(msgs)))
+	nb, err := marshalPlain(q)
+	if err != nil {
+		return body
+	}
+	return nb
+}
+
+// chatCalls is a Chat message's tool calls, as toolPairsOut typed them.
+func chatCalls(m map[string]any) []map[string]any {
+	calls, _ := m["tool_calls"].([]map[string]any)
+	return calls
+}
+
+// toolsPaired reports whether every assistant message's tool calls are
+// answered, each once, by the tool messages right after it, and every
+// tool message answers such a call: what Kimi and OpenAI hold a Chat
+// request to.
+func toolsPaired(msgs []map[string]any) bool {
+	var pending map[string]bool
+	closed := func() bool {
+		for _, open := range pending {
+			if open {
+				return false
+			}
+		}
+		pending = nil
+		return true
+	}
+	for _, m := range msgs {
+		if m["role"] == "tool" {
+			id := toolMsgID(m)
+			if !pending[id] {
+				return false
+			}
+			pending[id] = false
+			continue
+		}
+		if !closed() {
+			return false
+		}
+		if m["role"] == "assistant" {
+			if calls := chatCalls(m); len(calls) > 0 {
+				pending = map[string]bool{}
+				for _, c := range calls {
+					id, _ := c["id"].(string)
+					if _, twice := pending[id]; twice {
+						return false
+					}
+					pending[id] = true
+				}
+			}
+		}
+	}
+	return closed()
+}
+
+// joinSplitChatCalls joins a turn's calls split over consecutive
+// assistant messages into the first, as joinSplitCalls does for the
+// translations (#1275): the second message's calls follow the first's,
+// its text and thinking join the first's where both are strings, and
+// stand in for the first's when that has none.
+func joinSplitChatCalls(msgs []map[string]any) []map[string]any {
+	out := make([]map[string]any, 0, len(msgs))
+	for _, m := range msgs {
+		n := len(out)
+		if n == 0 || m["role"] != "assistant" || out[n-1]["role"] != "assistant" || len(chatCalls(out[n-1])) == 0 || len(chatCalls(m)) == 0 {
+			out = append(out, m)
+			continue
+		}
+		prev := out[n-1]
+		prev["tool_calls"] = append(chatCalls(prev), chatCalls(m)...)
+		for _, k := range []string{"content", "reasoning_content"} {
+			was, isText := prev[k].(string)
+			add, _ := m[k].(string)
+			if strings.TrimSpace(add) == "" || prev[k] != nil && !isText {
+				continue
+			}
+			if strings.TrimSpace(was) != "" {
+				add = was + "\n\n" + add
+			}
+			prev[k] = add
+		}
+	}
+	return out
 }

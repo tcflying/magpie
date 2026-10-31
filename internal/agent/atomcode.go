@@ -55,7 +55,7 @@ func atomcode(home string) *Agent { return atomcodeIn(here(home)) }
 // (see wsl.go), where ATOMCODE_HOME isn't read and its account names the
 // gateway as the distro reaches it, with the key it takes from there.
 func atomcodeIn(at place) *Agent {
-	dir := filepath.Join(at.home, ".atomcode")
+	dir := at.join(".atomcode")
 	if h := at.getenv("ATOMCODE_HOME"); filepath.IsAbs(h) {
 		dir = filepath.Clean(h)
 	}
@@ -115,6 +115,7 @@ func atomcodeIn(at place) *Agent {
 		ID: "atomcode", Name: "AtomCode", Icon: "atomcode", Spelled: prefixed, NoNames: true,
 		UA:  []string{"atomcode"},
 		Bin: "atomcode", Dir: dir, Path: path,
+		ListOnly: true,
 		Sync: func() error {
 			ts, err := edit.TOMLTables(path)
 			if err != nil {

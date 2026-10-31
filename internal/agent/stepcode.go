@@ -36,13 +36,13 @@ func stepcodeDir(at place) string {
 			name = custom
 		}
 	}
-	return filepath.Join(at.home, name)
+	return at.join(name)
 }
 
 func stepcodeProvider(at place) any {
 	ms := make([]map[string]any, 0)
 	for _, m := range magpieModels("stepcode") {
-		ms = append(ms, piModelJSON(m, at.gw(), true))
+		ms = append(ms, piModelJSON(piAsked("stepcode", m), at.gw(), true))
 	}
 	return map[string]any{
 		"name":    "magpie",

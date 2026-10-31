@@ -77,7 +77,8 @@ func mothxIn(at place) *Agent {
 			return wiringOff("MothX", path, func(k string) (string, bool) { return edit.GetJSON(path, "providers."+magpieID+"."+k) },
 				"baseUrl", at.v1(), "apiKey", key())
 		},
-		Sync: func() error { return syncJSON(path, "providers."+magpieID, block) },
+		ListOnly: true,
+		Sync:     func() error { return syncJSON(path, "providers."+magpieID, block) },
 		Notice: func() string {
 			if p, _ := get("defaultProvider"); p == magpieID && Running(`(^|/)mothx( |$)`, `(^|/)vibecoding( |$)`) {
 				return noticeMothx.String()
@@ -155,9 +156,9 @@ func mothxDir(at place) string {
 		if app := appdir.Getenv("APPDATA"); app != "" {
 			return filepath.Join(app, "mothx")
 		}
-		return filepath.Join(at.home, "AppData", "Roaming", "mothx")
+		return at.join("AppData", "Roaming", "mothx")
 	}
-	return filepath.Join(at.home, ".mothx")
+	return at.join(".mothx")
 }
 
 // mothxBlockKept is theirsKept for magpie's provider in MothX's

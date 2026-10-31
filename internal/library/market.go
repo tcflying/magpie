@@ -92,6 +92,7 @@ func secretEnv(key, label, where string) Input {
 // package is published, its endpoint answers.
 var featured = []MarketServer{
 	selfServer(),
+	browserServer(),
 	remoteServer("context7", "Context7", "Upstash", gh("upstash"), "https://mcp.context7.com/mcp",
 		"Up-to-date documentation and code examples for any library, straight into the prompt.", false,
 		Input{Key: "CONTEXT7_API_KEY", Where: "header", Label: "API key", Description: "Optional — raises the rate limit. From context7.com/dashboard", Secret: true, format: "{}"}),
@@ -106,6 +107,9 @@ var featured = []MarketServer{
 		"Ask questions about any public GitHub repository and read its generated wiki.", false),
 	remoteServer("exa", "Exa", "Exa", gh("exa-labs"), "https://mcp.exa.ai/mcp",
 		"Web search and code search built for agents, with clean page contents.", false),
+	remoteServer("anysearch", "AnySearch", "AnySearch", gh("anysearch-ai"), "https://api.anysearch.com/mcp",
+		"Real-time web search, vertical searches (finance, papers, code, security and more) and full pages as Markdown.", false,
+		Input{Key: "Authorization", Where: "header", Label: "API key", Description: "Optional — raises the rate limit. From anysearch.com/console/api-keys", Placeholder: "as_sk_…", Secret: true, format: "Bearer {}"}),
 	localServer("filesystem", "Filesystem", "Model Context Protocol", gh("modelcontextprotocol"), "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
 		"Read, write and search files, limited to the folders you allow.", "npx", []string{"-y", "@modelcontextprotocol/server-filesystem"},
 		Input{Key: "dir", Where: "arg", Label: "Folder", Description: "The folder it may read and write", Placeholder: "~/code", Required: true}),
@@ -172,6 +176,20 @@ func selfServer() MarketServer {
 	return m
 }
 
+// browserServerName is the name Magpie Browser's server is written under.
+const browserServerName = "magpie-browser"
+
+// browserServer is Magpie Browser: the agent uses the user's own browser,
+// its tabs signed in to the sites they use, through the extension magpie
+// sets up (gateway/browser.go). It acts as the user wherever they are
+// signed in, so it is given only to the agents picked for it.
+func browserServer() MarketServer {
+	m := localServer(browserServerName, "Magpie Browser", "Magpie", "https://usemagpie.ai/favicon.png", "https://usemagpie.ai",
+		"Use your own browser: your tabs, signed in to the sites you use. Open pages, click, type, upload, read and take screenshots, through the Magpie Browser extension.", magpieCommand, []string{"mcp", "browser"})
+	m.OptIn = true
+	return m
+}
+
 // selfCommand is the server's command and env for this magpie: its binary
 // by full path, and the gateway's address when it isn't the default one.
 func selfCommand(s *Server) {
@@ -195,6 +213,7 @@ var homepages = map[string]string{
 	"github":          "https://github.com/github/github-mcp-server",
 	"deepwiki":        "https://deepwiki.com",
 	"exa":             "https://docs.exa.ai/reference/exa-mcp",
+	"anysearch":       "https://github.com/anysearch-ai/anysearch-mcp-server",
 	"sentry":          "https://docs.sentry.io/product/sentry-mcp/",
 	"linear":          "https://linear.app/docs/mcp",
 	"notion":          "https://developers.notion.com/docs/mcp",
@@ -235,7 +254,8 @@ var seenServers = struct {
 // that match it, then the registry's. A search that is an address — a
 // repository, a page, an endpoint, a package — finds the ones at it.
 func MarketServers(q string) ([]MarketServer, error) {
-	q = strings.ToLower(strings.TrimSpace(q))
+	raw := strings.TrimSpace(q)
+	q = strings.ToLower(raw)
 	addr := address(q)
 	var out []MarketServer
 	for _, m := range featured {
@@ -253,9 +273,9 @@ func MarketServers(q string) ([]MarketServer, error) {
 	if q != "" {
 		var found []MarketServer
 		if addr != "" {
-			found, err = searchRegistryAt(addr)
+			found, err = searchAt(raw, addr)
 		} else {
-			found, err = searchRegistry(q)
+			found, err = searchWords(q)
 		}
 		for _, f := range found {
 			if !slices.ContainsFunc(out, func(m MarketServer) bool { return serverKey(&m.server) == serverKey(&f.server) }) {
@@ -280,8 +300,8 @@ func serverKey(s *Server) string {
 	if s.Remote() {
 		return strings.TrimSuffix(strings.ToLower(s.URL), "/")
 	}
-	if len(s.Args) == 2 && s.Args[0] == "mcp" && s.Args[1] == "image" {
-		return "magpie mcp image" // magpie's own, wherever its binary is
+	if len(s.Args) == 2 && s.Args[0] == "mcp" && (s.Args[1] == "image" || s.Args[1] == "browser") {
+		return "magpie mcp " + s.Args[1] // magpie's own, wherever its binary is
 	}
 	for _, a := range s.Args {
 		if a == "" || strings.HasPrefix(a, "-") || a == "run" {
@@ -367,7 +387,7 @@ func fetchRegistry(q string) ([]listed, error) {
 			} `json:"_meta"`
 		} `json:"servers"`
 	}
-	if err := getJSON(u, &body); err != nil {
+	if err := getJSONBy(registryClient, u, &body); err != nil {
 		return nil, &SearchError{Source: "the MCP Registry", Err: err}
 	}
 	var list []listed
@@ -955,10 +975,12 @@ func (l *Library) haveSkill(source, id, name string) string {
 		}
 	}
 	// one taken in from an agent's folder (npx skills puts them in
-	// ~/.agents/skills) has no source to match, and adding is turned away
-	// by name all the same (InstallMarketSkill): it's had by its name
+	// ~/.agents/skills) has no repository to match: it's had by its name,
+	// unless it is known to come from another repository. One by that name
+	// from another repository is another skill, added beside it
+	// (skill_beside.go)
 	for _, n := range []string{id, name} {
-		if s := l.skill(n); s != nil {
+		if s := l.skill(n); s != nil && (s.Source == nil || s.Source.Kind == "folder") && (s.From == "" || strings.EqualFold(s.From, source)) {
 			return s.Name
 		}
 	}
@@ -1043,7 +1065,9 @@ func InstallMarketSkill(source, id string, agents []string) (*Result, error) {
 	if !repoRe.MatchString(source) {
 		return nil, fmt.Errorf("%s isn't a GitHub repository", source)
 	}
-	p, err := cachedProbe(source)
+	// only this skill's folder, when the repository is too big to
+	// download whole (#2794)
+	p, err := cachedProbeFor(source, id)
 	if err != nil {
 		return nil, err
 	}
@@ -1139,6 +1163,17 @@ func fetchImage(u string) ([]byte, string, error) {
 
 var client = &http.Client{Timeout: 20 * time.Second}
 
+// registryTimeout is the MCP Registry's own budget: its search answers in
+// 13-37 s often enough (9 of 33 tries past 13 s, 6 past 20 s, the slowest
+// 37.3 s - measured in #3043) that the market's 20 s client emptied the
+// search with "context deadline exceeded". Its asks go with a longer one;
+// skills.sh and the icons keep the short one.
+var registryTimeout = 60 * time.Second
+
+// registryClient is the client the registry is asked with, a variable for
+// tests.
+var registryClient = &http.Client{Timeout: registryTimeout}
+
 // SearchError is a source the market searches that didn't answer; what
 // the market has of its own is still listed beside it (#1589).
 type SearchError struct {
@@ -1165,6 +1200,11 @@ func metaDescription(page []byte) string {
 }
 
 func get(u, accept string, limit int64) ([]byte, error) {
+	return getBy(client, u, accept, limit)
+}
+
+// getBy is get with the client: the registry's own budget (#3043).
+func getBy(c *http.Client, u, accept string, limit int64) ([]byte, error) {
 	req, err := http.NewRequest("GET", u, nil)
 	if err != nil {
 		return nil, err
@@ -1172,7 +1212,7 @@ func get(u, accept string, limit int64) ([]byte, error) {
 	// skills.sh answers a client it doesn't know with a page of its own
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 magpie")
 	req.Header.Set("Accept", accept)
-	resp, err := client.Do(req)
+	resp, err := c.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1181,7 +1221,7 @@ func get(u, accept string, limit int64) ([]byte, error) {
 	if resp.StatusCode == http.StatusServiceUnavailable {
 		resp.Body.Close()
 		time.Sleep(retryPause)
-		if resp, err = client.Do(req); err != nil {
+		if resp, err = c.Do(req); err != nil {
 			return nil, err
 		}
 	}
@@ -1201,6 +1241,15 @@ func get(u, accept string, limit int64) ([]byte, error) {
 
 func getJSON(u string, v any) error {
 	b, err := get(u, "application/json", 8<<20)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, v)
+}
+
+// getJSONBy is getJSON with the client (the registry's own budget, #3043).
+func getJSONBy(c *http.Client, u string, v any) error {
+	b, err := getBy(c, u, "application/json", 8<<20)
 	if err != nil {
 		return err
 	}

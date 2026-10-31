@@ -80,7 +80,7 @@ func CatalogFor(agent string) (shown, hidden []Entry) {
 // ListedFor is the catalog agent's visibility gives it, the models it may
 // pick to show or not among, and what the visibility keeps from it.
 func ListedFor(agent string) (listed, kept []Entry) {
-	all := Catalog()
+	all := catalogOf(agent)
 	names, ok := VisibleTo(agent)
 	if !ok {
 		return InOrder(agent, all), nil
@@ -294,7 +294,14 @@ func SetOwnModelsHidden(agent string, on bool) error {
 	} else {
 		s.OwnModelsHidden = slices.DeleteFunc(s.OwnModelsHidden, func(a string) bool { return a == agent })
 	}
-	return settings.Save(s)
+	if err := settings.Save(s); err != nil {
+		return err
+	}
+	// an agent's own config says the switch too (Claude Code's modelPicker
+	// replaceBuiltInOptions, #4548), so it is written again now, as a
+	// hidden model's change is
+	catalog.Touched()
+	return nil
 }
 
 // Families are the families providers and groups are tagged with, sorted.

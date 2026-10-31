@@ -28,7 +28,7 @@ func commandCode(home string) *Agent { return commandCodeIn(here(home)) }
 // reaches it.
 func commandCodeIn(at place) *Agent {
 	ccProviderJSON := func() any { return ccProviderJSONAt(at.v1()) }
-	dir := filepath.Join(at.home, ".commandcode")
+	dir := at.join(".commandcode")
 	path := filepath.Join(dir, "settings.json")
 	providers := filepath.Join(dir, "providers.json")
 	get := func(k string) string { v, _ := edit.GetJSON(path, k); return v }
@@ -42,6 +42,7 @@ func commandCodeIn(at place) *Agent {
 		ID: "commandcode", Name: "Command Code", Icon: "commandcode", Aliases: []string{"command-code", "cmd"}, Spelled: prefixed,
 		UA:  []string{"command-code", "commandcode"},
 		Bin: "command-code", Dir: dir, Path: path,
+		ListOnly: true,
 		Sync: func() error {
 			return syncJSON(providers, "provider."+magpieID, theirsKept(providers, "provider."+magpieID, ccProviderJSON, "models"))
 		},

@@ -10,13 +10,22 @@ import (
 	"github.com/yetone/magpie/internal/appdir"
 )
 
-// UserPath has nothing to do on Windows: an app started from the Start menu
-// gets the user's PATH from the registry, as a terminal does.
-func UserPath() {}
+// UserPath gives magpie, and what it starts, the Node a terminal has from
+// fnm (#2685). An app started from the Start menu gets the user's PATH from
+// the registry, as a terminal does, but fnm puts its Node on PATH from the
+// shell's profile (`fnm env | Invoke-Expression`) and never in the
+// registry: an MCP server run with npx, even by npx.cmd's full path, died
+// with "'node' is not recognized" once the package it fetched ran node.
+// The folder fnm's default alias names is added after the ones PATH has.
+func UserPath() {
+	home, _ := os.UserHomeDir()
+	addPath(fnmWinPath(home, appdir.Getenv("APPDATA"), os.Getenv("FNM_DIR")))
+}
 
 // UserBinDirs are the folders a user's command-line tools are installed in
 // that exist here — npm's global one, bun's, volta's, pnpm's, mise's
-// shims, the standalone installers' — for finding one PATH doesn't reach.
+// shims, the standalone installers', each Node version of fnm's, its
+// default first — for finding one PATH doesn't reach.
 func UserBinDirs() []string {
 	home, _ := os.UserHomeDir()
 	// mise's data folder: MISE_DATA_DIR, else XDG_DATA_HOME's mise (which
@@ -35,6 +44,9 @@ func UserBinDirs() []string {
 		filepath.Join(appdir.Getenv("LOCALAPPDATA"), "Volta", "bin"),
 		filepath.Join(appdir.Getenv("LOCALAPPDATA"), "pnpm"),
 		filepath.Join(mise, "shims"),
+	}
+	for _, r := range fnmWinRoots(home, appdir.Getenv("APPDATA"), os.Getenv("FNM_DIR")) {
+		known = append(known, fnmWinBins(r)...)
 	}
 	var have []string
 	for _, d := range known {
@@ -82,6 +94,9 @@ func LoginPath() []string {
 // user's variables from the registry, as a terminal does, so magpie's own
 // environment has them.
 func LoginEnv(string) string { return "" }
+
+// LoginEnvKnown is "" on Windows too (LoginEnv).
+func LoginEnvKnown(string) string { return "" }
 
 // ShellPath is LoginPath on Windows: PowerShell and cmd both take the
 // registry's PATH.
