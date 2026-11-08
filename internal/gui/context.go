@@ -110,6 +110,10 @@ type ctxJSON struct {
 	Days     int          `json:"days"`
 	Agents   []ctxAgent   `json:"agents"`
 	Sessions []ctxSession `json:"sessions"`
+	// held is set when a call was left out of every session, its reply not
+	// read yet (ctxRec.Unmatched): the answer then stands only until the
+	// page's next read, which is after the fork's file has been read again
+	held bool
 }
 
 // ctxSessions is how many sessions are listed, the latest; ctxPoints how
@@ -171,11 +175,18 @@ func mcpTokens(p *gateway.Prompt) int {
 // at every refresh (Yayoi_no_yume on X: a 1-core server with 962 MB went
 // down with the tab open).
 type ctxRec struct {
-	ID                         int64
-	Time                       time.Time
-	Agent, Model, Kind, Sub    string
-	Session, Parent, Conv      string
-	Done, Failed               bool
+	ID                      int64
+	Time                    time.Time
+	Millis                  int64 // how long it took: it ended at Time and this
+	Agent, Model, Kind, Sub string
+	Session, Parent, Conv   string
+	ResponseID              string
+	Done, Failed, Canceled  bool
+	// Unmatched is a call whose opening a fork copied too, whose reply names
+	// no session yet, and that ended too recently for its reply to be read
+	// (waitingForReply): it is its source's or the fork's, and no evidence
+	// here says which, so the tab counts it in neither (joinConvs)
+	Unmatched                  bool
 	Asked                      bool // it has a prompt of some tokens
 	Tokens, Window, MCP, Cache int
 	Counted, Tools, CacheKnown bool
@@ -185,9 +196,10 @@ type ctxRec struct {
 
 // recOf is r as the tab reads it, its whole prompt kept when whole.
 func recOf(r gateway.Route, whole bool) ctxRec {
-	c := ctxRec{ID: r.ID, Time: r.Time, Agent: r.Agent, Model: r.Model, Kind: r.Kind, Sub: r.Sub,
-		Session: r.Session, Parent: r.ParentSession, Conv: r.Conv, Done: r.Done,
-		Failed: r.Status >= 400 || r.Error != "", Cache: cacheOf(r), CacheKnown: cacheKnown(r)}
+	c := ctxRec{ID: r.ID, Time: r.Time, Millis: r.Millis, Agent: r.Agent, Model: r.Model, Kind: r.Kind, Sub: r.Sub,
+		Session: r.Session, Parent: r.ParentSession, Conv: r.Conv, ResponseID: r.ResponseID, Done: r.Done,
+		Failed: r.Status >= 400 || r.Error != "", Canceled: usage.CanceledBy(r.Status, r.Error),
+		Cache: cacheOf(r), CacheKnown: cacheKnown(r)}
 	if p := r.Prompt; p != nil {
 		c.Asked = p.Tokens > 0
 		c.Tokens, c.Window, c.Counted = p.Tokens, p.Window, p.Counted
@@ -267,15 +279,36 @@ func sessionOfRec(r *ctxRec) string {
 }
 
 // joinConvs puts a route that names no session under the agent's session
-// its conversation id was read from (sessions' Convs): dsh's
-// chat-completions and messages routes send no session id, so the gateway
-// keys each request by its first prompt's hash, and the page showed
-// "magpie-a…" where the Sessions page shows the session's title (Kumo31
-// on Discord). An id two sessions share stays as it is.
+// its reply or its conversation id was read from (sessions' ResponseIDs and
+// Convs): dsh's chat-completions and messages routes send no session id, so
+// the gateway keys each request by its first prompt's hash, and the page
+// showed "magpie-a…" where the Sessions page shows the session's title
+// (Kumo31 on Discord). A hash is the conversation's opening, which a fork
+// copies, so the reply's own id is asked first: a fork's reply has one its
+// source does not, and names the fork. An id two sessions share stays as it
+// is.
+//
+// An opening a fork copied names neither of the two, though: the source owns
+// it (the fork's copy was taken off Convs at its seed's end, sessions'
+// SeedConvs), yet the fork's own requests open the same way. A call of theirs
+// whose reply dsh hasn't written yet — in flight, or completed a moment
+// before, while the page reads the session's file — has nothing to say which
+// one it was, and counting it under the source moved the fork's own request
+// there: the source's card climbed with every turn of the fork. Such a call
+// is left out of both (ctxRec.Unmatched) until its reply names one, which the
+// next read of the fork's file does (the answer keeps for as long as one is
+// left out).
+//
+// Only a call that may yet be named is left out: one with a reply id, ended
+// within convsKept (waitingForReply). A call without a reply id — dsh's
+// history before #5491 recorded them, and a dsh that keeps none — goes by its
+// opening as it always did, or the source's own card would lose its history
+// and could vanish; and a call whose reply never comes falls back to its
+// opening after that window, so the page stops re-reading the sessions for it.
 func joinConvs(routes []ctxRec, list func() []sessions.Session) {
 	loose := false
 	for _, r := range routes {
-		if r.Session == "" && r.Parent == "" && r.Conv != "" {
+		if r.Session == "" && r.Parent == "" && (r.ResponseID != "" || r.Conv != "") {
 			loose = true
 			break
 		}
@@ -283,24 +316,141 @@ func joinConvs(routes []ctxRec, list func() []sessions.Session) {
 	if !loose {
 		return
 	}
-	of := map[string]string{}
-	for _, s := range list() {
-		for _, c := range s.Convs {
-			k := s.Agent + "\x00" + c
-			if id, ok := of[k]; ok && id != s.ID {
-				of[k] = ""
-			} else if !ok {
-				of[k] = s.ID
-			}
-		}
-	}
+	of := routeOwners(list())
+	now := time.Now()
 	for i, r := range routes {
-		if r.Session == "" && r.Parent == "" && r.Conv != "" {
-			if id := of[r.Agent+"\x00"+r.Conv]; id != "" {
-				routes[i].Session = id
-			}
+		if r.Session != "" || r.Parent != "" {
+			continue
+		}
+		id, byReply := ownerBy(r.Agent, r.ResponseID, r.Conv, of)
+		if !byReply && r.ResponseID != "" && of[ownerKey(r.Agent, ownerResponse, r.ResponseID)] != "" {
+			// the reply names another conversation, and the guard for a
+			// vendor's repeated ids keeps the opening: as it did before
+			// reply ids were read
+			routes[i].Session = id
+			continue
+		}
+		if !byReply && waitingForReply(&routes[i], sharedOpening(r.Agent, r.Conv, of), now) {
+			// its opening is the source's and a fork's both, and its reply
+			// names no one yet: it is neither's until it does
+			routes[i].Unmatched = true
+			continue
+		}
+		routes[i].Session = id
+	}
+}
+
+// waitingForReply says a call is one whose reply may still name its session:
+// it has a reply id, its opening a fork copied too (shared), and it ended
+// within convsKept — the window Routing's looseKeys waits in for the reply
+// dsh writes after its file (trace.go). Past that no reply is coming: the
+// call goes by its opening, as it did before reply ids were read.
+func waitingForReply(r *ctxRec, shared bool, now time.Time) bool {
+	return shared && r.ResponseID != "" && now.Sub(r.Time.Add(time.Duration(r.Millis)*time.Millisecond)) < convsKept
+}
+
+// ownerOf is the session an agent's route that names none belongs to: the
+// one whose own replies carry the route's reply id, and, when no one's does,
+// the one whose conversation the route opens. A reply id is the vendor's,
+// which some give out again (Ollama's chatcmpl-<0-998>), so it names a
+// session over the opening only where the two agree: the opening is no
+// one's, or two sessions', or the reply's session's own, or one it was
+// forked from (sessions' ForkOf, or the opening its seed carried when the
+// fork names no parent). Another session's opening goes by the opening, as
+// it did before reply ids were read.
+func ownerOf(agent, responseID, conv string, of map[string]string) string {
+	id, _ := ownerBy(agent, responseID, conv, of)
+	return id
+}
+
+// ownerBy is ownerOf, and whether the reply named the session rather than
+// the opening: a route whose opening a fork copied too, and whose reply names
+// no session, belongs to neither (joinConvs).
+func ownerBy(agent, responseID, conv string, of map[string]string) (id string, byReply bool) {
+	opened := ""
+	if conv != "" {
+		opened = of[ownerKey(agent, ownerConv, conv)]
+	}
+	if responseID != "" {
+		if id := of[ownerKey(agent, ownerResponse, responseID)]; id != "" && (opened == "" || forkedFrom(agent, id, opened, conv, of)) {
+			return id, true
 		}
 	}
+	return opened, false
+}
+
+// sharedOpening says conv is an opening a fork copied (sessions' SeedConvs):
+// the session that owns it and the fork whose seed opened that way both do,
+// so the opening alone doesn't say which one a route that opens that way is.
+func sharedOpening(agent, conv string, of map[string]string) bool {
+	return conv != "" && of[ownerKey(agent, ownerCopied, conv)] != ""
+}
+
+// forkedFrom says session id is from, or a fork of it, or of a fork of it:
+// by the source its header names (ForkOf), or, for a fork dsh wrote with
+// none, by the opening conv its seed carried (sessions' SeedConvs).
+func forkedFrom(agent, id, from, conv string, of map[string]string) bool {
+	for n := 0; id != "" && n < 64; n++ {
+		if id == from {
+			return true
+		}
+		if conv != "" && of[ownerKey(agent, ownerSeed, id+"\x00"+conv)] != "" {
+			return true
+		}
+		id = of[ownerKey(agent, ownerFork, id)]
+	}
+	return false
+}
+
+// The kinds of id a route without a session id is named by: the reply it
+// got, and the conversation it opens; and a session's source, for the
+// session a fork's reply names (ForkOf), the opening a fork's seed carried,
+// kept on the fork itself (SeedConvs), and that opening kept again among the
+// openings a fork copied, which names neither the source nor the fork alone
+// (ownerCopied).
+const (
+	ownerResponse = "response"
+	ownerConv     = "conv"
+	ownerFork     = "fork"
+	ownerSeed     = "seed"
+	ownerCopied   = "copied"
+)
+
+func ownerKey(agent, kind, id string) string { return agent + "\x00" + kind + "\x00" + id }
+
+// routeOwners is each agent's reply ids and conversation ids (agent, NUL,
+// kind, NUL, the id) and the session of that agent each was read from
+// (sessions' ResponseIDs and Convs); "" for an id two sessions share, which
+// stays as it is. A fork's session id is kept with the one it was forked
+// from (ownerFork), and the openings its seed carried among the openings a
+// fork copied (ownerCopied).
+func routeOwners(list []sessions.Session) map[string]string {
+	of := map[string]string{}
+	put := func(k, id string) {
+		if was, ok := of[k]; ok && was != id {
+			of[k] = ""
+		} else if !ok {
+			of[k] = id
+		}
+	}
+	for _, s := range list {
+		for _, c := range s.Convs {
+			put(ownerKey(s.Agent, ownerConv, c), s.ID)
+		}
+		for _, r := range s.ResponseIDs {
+			put(ownerKey(s.Agent, ownerResponse, r), s.ID)
+		}
+		if s.ForkOf != "" {
+			of[ownerKey(s.Agent, ownerFork, s.ID)] = s.ForkOf
+		}
+		for _, c := range s.SeedConvs {
+			// the fork's own record that its seed opened c, the opening
+			// it shares with the session it was copied from
+			of[ownerKey(s.Agent, ownerSeed, s.ID+"\x00"+c)] = s.ID
+			of[ownerKey(s.Agent, ownerCopied, c)] = s.ID
+		}
+	}
+	return of
 }
 
 // compacted says a prompt is a compaction of the one before it: under 60%
@@ -395,7 +545,11 @@ func contextOfRecs(routes []ctxRec, days int) ctxJSON {
 		}
 		acc.a.Calls++
 		if r.Failed {
-			acc.a.Errors++
+			// one its agent canceled was no error it saw, nor a prompt it
+			// finished asking
+			if !r.Canceled {
+				acc.a.Errors++
+			}
 			continue
 		}
 		if !r.Asked || r.Kind != "" || !r.Tools && tooled[ctxKey(r)] {
@@ -424,9 +578,15 @@ func contextOfRecs(routes []ctxRec, days int) ctxJSON {
 		}
 		acc.a.Window = max(acc.a.Window, window)
 		key := sessionOfRec(r)
-		if key == "" || r.Sub != "" {
+		if key == "" || r.Sub != "" || r.Unmatched {
 			// a subagent's prompt is its own conversation's, not the
-			// one whose session id it goes under
+			// one whose session id it goes under; a call whose opening
+			// a fork copied is neither's until its reply names one, and
+			// counting it under the source is what the fork's own card
+			// climbed with
+			if r.Unmatched {
+				out.held = true
+			}
 			continue
 		}
 		acc.sessions[key] = true
@@ -665,6 +825,13 @@ type ctxDay struct {
 // again after it.
 const ctxAgain = time.Minute
 
+// ctxWhileUnmatched is how long an answer stands when a call was left out
+// of every session, its reply not read yet (ctxRec.Unmatched): the page
+// reads every 5 s, and the read after the fork's file is read again names
+// it. Only a call within convsKept is left out (waitingForReply), so this
+// ends with that window: one whose reply never comes goes by its opening.
+const ctxWhileUnmatched = 5 * time.Second
+
 // readingDay, in tests, is told each day the tab reads from the history.
 var readingDay func(day string)
 
@@ -741,13 +908,18 @@ func contextRecsLocked(r *http.Request, days int) (out []ctxRec, stamp string) {
 }
 
 // contextFor is the tab's answer for the days asked for: the last one
-// again when its routes are the same and it isn't ctxAgain old.
+// again when its routes are the same and it isn't ctxAgain old, or
+// ctxWhileUnmatched old when it left a route out of every session.
 func contextFor(r *http.Request, days int) ctxJSON {
 	ctxKept.Lock()
 	defer ctxKept.Unlock()
 	recs, stamp := contextRecsLocked(r, days)
 	stamp = strconv.Itoa(days) + "|" + stamp
-	if stamp == ctxKept.key && time.Since(ctxKept.at) < ctxAgain {
+	keep := ctxAgain
+	if ctxKept.out.held {
+		keep = ctxWhileUnmatched
+	}
+	if stamp == ctxKept.key && time.Since(ctxKept.at) < keep {
 		return ctxKept.out
 	}
 	out := contextOfRecs(recs, days)
@@ -766,7 +938,8 @@ func contextRoutesAPI(mux *http.ServeMux) {
 	// the text of a part of a request's prompt (masaka on Discord): the
 	// part's items, and one item's text when item is given. From the
 	// gateway this GUI runs, which keeps the last requests' masked bodies
-	// in memory only; 404 when the request's is no longer kept.
+	// in memory only, else from the request archive; 404 with why when
+	// neither has it.
 	mux.HandleFunc("GET /api/context/text", func(rw http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		id, err := strconv.ParseInt(q.Get("id"), 10, 64)
@@ -781,15 +954,17 @@ func contextRoutesAPI(mux *http.ServeMux) {
 				return
 			}
 		}
-		gw := served.Load()
-		if gw == nil {
-			http.Error(rw, "not kept", http.StatusNotFound)
-			return
+		var pt gateway.PromptText
+		ok := false
+		if gw := served.Load(); gw != nil {
+			pt, ok = gw.PromptText(id, q.Get("kind"), item >= 0)
 		}
-		pt, ok := gw.PromptText(id, q.Get("kind"), item >= 0)
 		if !ok {
-			http.Error(rw, "not kept", http.StatusNotFound)
-			return
+			// gone from memory: the request archive's copy, when it
+			// kept one (context_archive.go)
+			if pt, ok = archivedPromptText(rw, r, id, q.Get("kind"), item >= 0); !ok {
+				return
+			}
 		}
 		if item >= 0 {
 			// the one item's text; the rest by name and size only
@@ -809,4 +984,5 @@ func contextRoutesAPI(mux *http.ServeMux) {
 		rw.Header().Set("Cache-Control", "no-store")
 		writeJSON(rw, pt)
 	})
+	contextReplyAPI(mux)
 }

@@ -46,16 +46,61 @@ func bailianDecides(base string) bool {
 	return strings.HasSuffix(h, ".maas.aliyuncs.com") || h == "maas.qianwenaiapi.com" || strings.HasSuffix(h, ".maas.qianwenaiapi.com")
 }
 
-// bailianApart reports whether p serves conversations and Bailian's
-// decision model both (Bailian's Token Plan, #1506): its chat models'
-// list never names the decision model, which is kept apart from it.
+// ArkDecision is the model Volcengine Ark answers System One with, in its
+// beta (axelburks on Discord): doubao-seed-2-1-lite-260915. Asked on
+// 11-01, Ark's other Seed models it serves the account
+// (doubao-seed-2-1-pro-260628, doubao-seed-2-0-lite-260428) and
+// deepseek-v4-1-flash were each refused 400 "does not support the
+// SystemOne API".
+const ArkDecision = "doubao-seed-2-1-lite-260915"
+
+// ArkSystemOneHeader is the header Ark's System One API is turned on by
+// while it is in beta: without it, POST …/systemone is a bare 404.
+const ArkSystemOneHeader = "ark-beta-systemone-api"
+
+// arkDecides reports whether base is Volcengine Ark's own API host,
+// ark.<region>.volces.com, whose pay-as-you-go /api/v1 and /api/v3 answer
+// System One at …/systemone. Its Coding and Agent Plans' paths
+// (/api/coding/v3, /api/plan/v3) answer it nothing (404), and neither
+// /models lists the decision model.
+func arkDecides(base string) bool {
+	h := HostOf(base)
+	return strings.HasPrefix(h, "ark.") && strings.HasSuffix(h, ".volces.com")
+}
+
+// vendorDecision is the decision model of the vendor whose System One
+// API base is, Bailian's or Ark's, which its model list never names.
+func vendorDecision(base string) (catalog.Model, bool) {
+	switch {
+	case bailianDecides(base):
+		return catalog.Model{ID: BailianDecision, Name: "Decision model (preview)"}, true
+	case arkDecides(base):
+		return catalog.Model{ID: ArkDecision, Name: "Doubao Seed 2.1 Lite"}, true
+	}
+	return catalog.Model{}, false
+}
+
+// DecideHeaders sets on h what p's decision API needs besides its key:
+// Ark's beta switch (ArkSystemOneHeader) on Ark's host.
+func (p Provider) DecideHeaders(h http.Header) {
+	if arkDecides(p.Decide) {
+		h.Set(ArkSystemOneHeader, "true")
+	}
+}
+
+// bailianApart reports whether p serves conversations and a vendor's own
+// decision model both (Bailian's Token Plan, #1506, or Ark's pay as you
+// go with its decision URL given): its chat models' list never names the
+// decision model, which is kept apart from it.
 func (p Provider) bailianApart() bool {
-	return !p.DecideOnly() && bailianDecides(p.Decide)
+	_, ok := vendorDecision(p.Decide)
+	return !p.DecideOnly() && ok
 }
 
 // ownDecideModels are a System One provider's models that its vendor's
 // list may not name: the ones picked for a decision-only provider (a
-// vendor's own decision model needn't be called jev-…), else Bailian's.
+// vendor's own decision model needn't be called jev-…), else Bailian's
+// or Ark's.
 func (p Provider) ownDecideModels() []catalog.Model {
 	var out []catalog.Model
 	if p.DecideOnly() {
@@ -65,8 +110,8 @@ func (p Provider) ownDecideModels() []catalog.Model {
 			}
 		}
 	}
-	if len(out) == 0 && bailianDecides(p.Decide) {
-		out = []catalog.Model{{ID: BailianDecision, Name: "Decision model (preview)"}}
+	if m, ok := vendorDecision(p.Decide); len(out) == 0 && ok {
+		out = []catalog.Model{m}
 	}
 	return out
 }
@@ -92,8 +137,13 @@ func (p Provider) DecidesModel(model string) bool {
 	if p.DecideOnly() {
 		return true
 	}
+	// one the user set to be asked on System One (DecideAPI)
+	if p.decideSet(model) {
+		return true
+	}
 	if p.bailianApart() {
-		return model == BailianDecision
+		m, _ := vendorDecision(p.Decide)
+		return model == m.ID
 	}
 	// decideListed's answer, without its list copied for each model
 	// asked about: a provider's every model was asked, a copy of the whole
@@ -104,7 +154,7 @@ func (p Provider) DecidesModel(model string) bool {
 	if p.listsDecisions() {
 		// OpenRouter's Jev Router (typesafe/jev-router) is a chat model
 		if id := decisionsID(p.ID); catalog.LiveListed(id) {
-			return len(catalog.LiveByID(id, model)) > 0
+			return len(catalog.LiveByID(id, model)) > 0 || p.openRouterVariant(model)
 		}
 		return !p.serverMarksDecisions() && model == OpenRouterJev
 	}
@@ -172,6 +222,24 @@ func (p Provider) listsDecisions() bool {
 // and lists none while it has none.
 func (p Provider) serverMarksDecisions() bool {
 	return p.omlxDecides() || p.mlxServeDecides() || p.ollamaDecides()
+}
+
+// openRouterVariant reports whether model is one of the decision models
+// OpenRouter lists with a variant after it (inception/mercury-decide:free,
+// …:nitro): OpenRouter's list names the model once, and a variant goes to
+// the same decisions endpoint, never chat/completions (coeo91 on Discord:
+// inception/mercury-decide:free, picked by hand, was sent as a chat model
+// and refused 400 "is a decisions model"). Only OpenRouter's ids take a
+// variant so; an Ollama decision model's :tag is a name of its own.
+func (p Provider) openRouterVariant(model string) bool {
+	if openRouterDecisions(p.Decide) == "" {
+		return false
+	}
+	i := strings.LastIndexByte(model, ':')
+	if i <= 0 || i == len(model)-1 || strings.Contains(model[i:], "/") {
+		return false
+	}
+	return len(catalog.LiveByID(decisionsID(p.ID), model[:i])) > 0
 }
 
 // decisionsID is where a provider that serves conversations too keeps the
@@ -342,7 +410,15 @@ func (p Provider) Jev() string {
 // list when fetched, else Jev's aliases (a gateway's one Jev), each with
 // its window and whether it takes images where its vendor's docs say.
 func (p Provider) decideModels() []catalog.Model {
-	return withDecideFacts(p.decideListed())
+	ms := p.decideListed()
+	// and the ones the user set to be asked on System One, first
+	if set := p.decideSetModels(); len(set) > 0 {
+		set = slices.DeleteFunc(set, func(m catalog.Model) bool {
+			return slices.ContainsFunc(ms, func(l catalog.Model) bool { return l.ID == m.ID })
+		})
+		ms = append(set, ms...)
+	}
+	return withDecideFacts(ms)
 }
 
 // A decision model's window and whether it reads images, as its vendor's
@@ -366,6 +442,11 @@ func decideFactOf(id string) (decideFact, bool) {
 		return decideFact{context: 65_536, images: true}, true
 	case last == BailianDecision:
 		return decideFact{context: 65_536}, true
+	case last == ArkDecision:
+		// its window on System One is not documented; an image in the
+		// request was left unread on 11-01 (a red square asked "is it
+		// red?" came back 0.48, its input tokens as for no image)
+		return decideFact{}, true
 	}
 	return decideFact{}, false
 }
@@ -532,7 +613,7 @@ func (p Provider) cloudflareAccount(ctx context.Context) (string, error) {
 	if err := p.Sign(ctx, req, Chat, nil); err != nil {
 		return "", err
 	}
-	res, err := http.DefaultClient.Do(req)
+	res, err := Keyed(http.DefaultClient).Do(req)
 	if err != nil {
 		return "", fmt.Errorf("%s: %v", p.Name, err)
 	}
@@ -753,7 +834,7 @@ func resolveDecideModel(p Provider, name string) (string, bool) {
 			return name, true
 		}
 	}
-	if name == p.Jev() {
+	if name == p.Jev() || p.openRouterVariant(name) {
 		return name, true
 	}
 	// a gateway lists one Jev, named its own way; jev-latest is that model
@@ -838,8 +919,9 @@ func (p Provider) fetchDecide(ctx context.Context) ([]catalog.Model, error) {
 		list = mlxServeDecisions(p.Decide)
 	} else if p.ollamaDecides() {
 		list = ollamaDecisions(p.Decide)
-	} else if bailianDecides(p.Decide) {
-		// Bailian lists its chat models only: its decision model is asked
+	} else if _, ok := vendorDecision(p.Decide); ok {
+		// Bailian and Ark list their chat models only: the decision model
+		// is asked
 		return p.decideAsked(ctx)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, list, nil)
@@ -849,7 +931,7 @@ func (p Provider) fetchDecide(ctx context.Context) ([]catalog.Model, error) {
 	if err := p.Sign(ctx, req, Chat, nil); err != nil {
 		return nil, err
 	}
-	res, err := http.DefaultClient.Do(req)
+	res, err := Keyed(http.DefaultClient).Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -927,6 +1009,8 @@ func (p Provider) decideAsked(ctx context.Context) ([]catalog.Model, error) {
 // AskSystemOne sends model the smallest System One question at p's
 // decision API, and says why it wasn't answered.
 func (p Provider) AskSystemOne(ctx context.Context, model string) error {
+	// the model's own headers
+	ctx = WithModel(ctx, p.ID, model)
 	if pat, off := ModelDisabled(p.ID, model); off { // never asked (#1867)
 		return fmt.Errorf("model %s/%s is disabled in magpie (it matches %q)", p.ID, model, pat)
 	}
@@ -944,6 +1028,7 @@ func (p Provider) AskSystemOne(ctx context.Context, model string) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	p.DecideHeaders(req.Header)
 	if err := p.Sign(ctx, req, Chat, nil); err != nil {
 		return err
 	}
@@ -1060,7 +1145,7 @@ func (p Provider) checkKey(ctx context.Context, u string) error {
 	if err := p.Sign(ctx, req, Chat, nil); err != nil {
 		return err
 	}
-	res, err := http.DefaultClient.Do(req)
+	res, err := Keyed(http.DefaultClient).Do(req)
 	if err != nil {
 		return fmt.Errorf("%s: %v", p.Name, err)
 	}

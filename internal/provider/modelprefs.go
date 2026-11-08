@@ -351,9 +351,9 @@ func Reasonless(pid, model string) bool {
 // models, by model id.
 func (p Provider) ModelEfforts() map[string][]string {
 	out := map[string][]string{}
-	for k, es := range settings.Load().ModelEfforts {
+	for k, es := range settings.Shared().ModelEfforts {
 		if m, ok := strings.CutPrefix(k, p.ID+"/"); ok && len(es) > 0 {
-			out[m] = es
+			out[m] = slices.Clone(es) // the shared settings' own
 		}
 	}
 	return out
@@ -437,9 +437,16 @@ func setModelAPI(ref, api string) (bool, error) {
 		return false, err
 	}
 	proto := Protocol(strings.TrimSpace(api))
-	if proto != "" {
+	if proto == DecideAPI {
+		if !p.TakesDecideAPI() {
+			return false, fmt.Errorf("%s has no System One URL beside a conversation one to ask %s on: add it under More endpoints first", p.ID, model)
+		}
+		if !p.serves(model) {
+			return false, fmt.Errorf("%s has no model %s (magpie provider %s lists them)", p.ID, model, p.ID)
+		}
+	} else if proto != "" {
 		if !modelAPI(proto) {
-			return false, fmt.Errorf("a model's API is chat, responses, anthropic or gemini, not %q", api)
+			return false, fmt.Errorf("a model's API is chat, responses, anthropic, gemini or decide (System One), not %q", api)
 		}
 		if p.Base(proto) == "" {
 			return false, fmt.Errorf("%s has no %s URL to ask %s on: add it under More endpoints first", p.ID, proto, model)
@@ -469,13 +476,89 @@ func setModelAPI(ref, api string) (bool, error) {
 
 // ModelAPI is the API the user said p's model is asked on, when p has a
 // URL for it still.
+//
+// The Providers page asks it of each model of every provider's list, and
+// most have no API set: that is looked up first, and the protocols p
+// speaks are counted, not listed (a list made for each model was 12 MB of
+// what forty polls allocated with real accounts).
 func (p Provider) ModelAPI(model string) (Protocol, bool) {
-	// Vertex AI's model id says its one API (ListedAPIs)
-	if len(p.Speaks()) < 2 || p.IsVertex() {
+	proto, ok := p.apiSet(model)
+	if !ok {
 		return "", false
 	}
+	if proto == DecideAPI {
+		return proto, p.TakesDecideAPI()
+	}
+	n := 0
+	for range p.speaking {
+		if n++; n == 2 {
+			break
+		}
+	}
+	return p.modelAPIAmong(n, proto)
+}
+
+// DecideAPI is the API a model is set to be asked on (SetModelAPI) when it
+// is a decision model at its provider's System One URL (axelburks on
+// Discord: a relay that serves its chat models and its own decision model
+// under one key, the decision model named as the relay names it). Such a
+// model is a decision model (DecidesModel): a routing group can ask it as
+// a turn begins, and it is refused for a conversation, as Jev is.
+const DecideAPI Protocol = "decide"
+
+// TakesDecideAPI reports whether p's models can be set to be asked on its
+// System One URL: a key's provider with one beside a conversation URL. A
+// provider with a System One URL alone asks every model there already; a
+// signed-in account, a plugin and a remote magpie say which of theirs
+// decide themselves.
+func (p Provider) TakesDecideAPI() bool {
+	return p.Decides() && !p.DecideOnly() && p.DecideAPIKind()
+}
+
+// DecideAPIKind reports whether p is a provider whose models could be set
+// to be asked on System One once it has a URL for it there.
+func (p Provider) DecideAPIKind() bool {
+	return p.Account == nil && !p.IsRemoteMagpie() && !p.IsVertex()
+}
+
+// decideSet reports whether the user set p's model to be asked on System
+// One, and p takes it.
+func (p Provider) decideSet(model string) bool {
+	proto, ok := p.apiSet(model)
+	return ok && proto == DecideAPI && p.TakesDecideAPI()
+}
+
+// decideSetModels are p's models the user set to be asked on System One,
+// in id order.
+func (p Provider) decideSetModels() []catalog.Model {
+	if !p.TakesDecideAPI() {
+		return nil
+	}
+	var out []catalog.Model
+	for k, v := range heldSettings().ModelAPIs {
+		if m, ok := strings.CutPrefix(k, p.ID+"/"); ok && Protocol(v) == DecideAPI {
+			out = append(out, catalog.Model{ID: m})
+		}
+	}
+	slices.SortFunc(out, func(a, b catalog.Model) int { return strings.Compare(a.ID, b.ID) })
+	return out
+}
+
+// apiSet is the API the user set model to be asked on, false with
+// none.
+func (p Provider) apiSet(model string) (Protocol, bool) {
 	proto := Protocol(heldSettings().ModelAPIs[p.ID+"/"+model])
-	if proto == "" || !modelAPI(proto) || p.Base(proto) == "" {
+	return proto, proto != ""
+}
+
+// modelAPIAmong is ModelAPI with the number of protocols p speaks (up to
+// two) and the one set found already.
+func (p Provider) modelAPIAmong(speaks int, proto Protocol) (Protocol, bool) {
+	// Vertex AI's model id says its one API (ListedAPIs)
+	if speaks < 2 || p.IsVertex() {
+		return "", false
+	}
+	if !modelAPI(proto) || p.Base(proto) == "" {
 		return "", false
 	}
 	return proto, true
@@ -489,7 +572,7 @@ func modelAPI(proto Protocol) bool {
 	return slices.Contains(Protocols, proto) || proto == Gemini
 }
 
-// ModelPref is what the provider editor's Names & levels changed of one
+// ModelPref is what the provider editor's Model settings changed of one
 // model, sent with its Save: each part left nil is as it was. Name "" gives
 // the model its own name back, Efforts [] all its levels, OwnImages the
 // vendor's answer for whether it sees images, API "" every API the
@@ -516,6 +599,9 @@ type ModelPref struct {
 	// takes it: "" for the provider's own. It is applied after every
 	// other change of the save, so those go with the model to its id.
 	ID *string `json:"id,omitempty"`
+	// Headers are the model's own request headers, as SetModelHeaders
+	// takes them, in place of those it had: none takes them away
+	Headers *map[string]string `json:"headers,omitempty"`
 }
 
 // SetModelPrefs makes the changes to a provider's models, by model id, as
@@ -563,6 +649,12 @@ func SetModelPrefs(pid string, prefs map[string]ModelPref) error {
 			}
 			if m.Same != nil {
 				if err := set(setModelSame(ref, *m.Same)); err != nil {
+					return err
+				}
+			}
+			// nor are a model's headers, which go on its requests alone
+			if m.Headers != nil {
+				if _, err := setModelHeaders(ref, *m.Headers); err != nil {
 					return err
 				}
 			}
@@ -931,7 +1023,7 @@ func SetPlainNames(on bool) error {
 // ModelNames are the names the user gave the provider's models, by model id.
 func (p Provider) ModelNames() map[string]string {
 	out := map[string]string{}
-	for k, n := range settings.Load().ModelNames {
+	for k, n := range settings.Shared().ModelNames {
 		if m, ok := strings.CutPrefix(k, p.ID+"/"); ok && n != "" {
 			out[m] = n
 		}

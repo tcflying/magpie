@@ -49,7 +49,7 @@ func trayGlyph(c color.NRGBA) []byte {
 // image the system tints (the Mac's menu bar): the mark alone on the Mac
 // and Linux (linuxTrayIcon, light saying the desktop prefers a light
 // scheme), and in Windows' tray the app's mark at the size the system asks
-// for (trayWindowsIcon), which is an icon with a size for every DPI, so the
+// for (winTrayIcon), which is an icon with a size for every DPI, so the
 // notification area takes one of it as it is instead of scaling a bigger
 // one (#2404).
 func trayIconFor(goos string, light bool) (icon []byte, template bool) {
@@ -59,7 +59,7 @@ func trayIconFor(goos string, light bool) (icon []byte, template bool) {
 	case "linux":
 		return linuxTrayIcon(light), false
 	}
-	return trayWindowsIcon, false
+	return winTrayIcon, false
 }
 
 // linuxTrayIcon is the glyph for a desktop whose colour scheme preference

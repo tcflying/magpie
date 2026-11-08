@@ -3,6 +3,7 @@ package pii
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -34,9 +35,15 @@ type hello struct {
 
 // helper is one pf-serve running.
 type helper struct {
-	cmd    *exec.Cmd
-	in     io.WriteCloser
-	out    *bufio.Reader
+	cmd *exec.Cmd
+	in  io.WriteCloser
+	out *bufio.Reader
+	// outf is out's end of the stdout pipe. It is magpie's, not
+	// cmd's: cmd.Wait closes a StdoutPipe as the process exits, so a
+	// read after a death got "read |0: file already closed" in place of
+	// the EOF that says pf-serve died, and the status showed that as why
+	// the GPU was lost (#3741). Closed by kill and end.
+	outf   *os.File
 	stderr *tail
 	hello  hello
 	exited chan struct{}
@@ -165,7 +172,15 @@ type candidate struct {
 // which runs on Metal; then pf-serve on the CPU, which runs anywhere.
 // macOS's was tried on Metal alone: one whose load hung there, or ended,
 // was tried again on Metal by every request (lazyeo, an M2).
+// A CPU without what pf-serve is built for runs pf-serve-base, on the
+// CPU alone: pf-serve-vulkan is built like pf-serve, and would end the
+// same way.
 func candidates(cpu bool) []candidate {
+	if !fullX86() {
+		if _, err := os.Stat(exe("pf-serve-base")); err == nil {
+			return []candidate{{exe("pf-serve-base"), true}}
+		}
+	}
 	var out []candidate
 	if !cpu {
 		if _, err := os.Stat(exe("pf-serve-vulkan")); err == nil {
@@ -182,6 +197,21 @@ func candidates(cpu bool) []candidate {
 func start(cpu bool, stop <-chan struct{}) (*helper, error) {
 	if !Installed() {
 		return nil, ErrNotInstalled
+	}
+	if !strings.HasSuffix(binDir(), "-"+target()) {
+		// only the Intel pf-serve under Rosetta, which may not start at
+		// all: Apple silicon's is fetched first, and one that can't be
+		// leaves the Intel one to try
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		go func() {
+			select {
+			case <-stop:
+				cancel()
+			case <-ctx.Done():
+			}
+		}()
+		ensureServe(ctx)
+		cancel()
 	}
 	upgrades.Add(1)
 	go func() {
@@ -254,13 +284,19 @@ func startOne(path string, cpu bool, stop <-chan struct{}) (*helper, error) {
 	if err != nil {
 		return nil, err
 	}
-	out, err := cmd.StdoutPipe()
+	out, w, err := os.Pipe()
 	if err != nil {
+		in.Close()
 		return nil, err
 	}
-	h := &helper{cmd: cmd, in: in, out: bufio.NewReaderSize(out, 64<<10), stderr: &tail{}, exited: make(chan struct{})}
+	cmd.Stdout = w
+	h := &helper{cmd: cmd, in: in, out: bufio.NewReaderSize(out, 64<<10), outf: out, stderr: &tail{}, exited: make(chan struct{})}
 	cmd.Stderr = h.stderr
-	if err := cmd.Start(); err != nil {
+	err = cmd.Start()
+	// pf-serve has its own copy: once it exits, a read here sees EOF
+	w.Close()
+	if err != nil {
+		out.Close()
 		return nil, err
 	}
 	go func() {
@@ -365,6 +401,7 @@ func (h *helper) kill() {
 		h.cmd.Process.Kill()
 	}
 	<-h.exited
+	h.outf.Close()
 }
 
 // Warm starts pf-serve in the background, where the model is on disk, so
@@ -438,6 +475,7 @@ func end(h *helper) {
 	h.in.Close()
 	select {
 	case <-h.exited:
+		h.outf.Close()
 	case <-time.After(5 * time.Second):
 		h.kill()
 	}
@@ -615,6 +653,7 @@ func (h *helper) classify(texts []string) ([][]redact.Found, error) {
 	if _, err := h.in.Write(b.Bytes()); err != nil {
 		return nil, fmt.Errorf("pf-serve %s (%v)", h.died(), err)
 	}
+	beforeRead(h)
 	r := &reader{r: h.out}
 	status := r.u32()
 	if status == 1 {
@@ -646,6 +685,10 @@ func (h *helper) classify(texts []string) ([][]redact.Found, error) {
 	}
 	return out, nil
 }
+
+// beforeRead runs between sending a request and reading its answer, for
+// a test to read after pf-serve has exited (TestGPUDeathReadAfterExit).
+var beforeRead = func(*helper) {}
 
 type reader struct {
 	r   *bufio.Reader

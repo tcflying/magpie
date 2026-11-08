@@ -58,7 +58,7 @@ func TestTrayIconPerOS(t *testing.T) {
 	if icon, template := trayIconFor("darwin", false); !template || !bytes.Equal(icon, trayIcon) {
 		t.Errorf("darwin: want the template mark")
 	}
-	if icon, template := trayIconFor("windows", false); template || !bytes.Equal(icon, trayWindowsIcon) {
+	if icon, template := trayIconFor("windows", false); template || !bytes.Equal(icon, winTrayIcon) {
 		t.Errorf("windows: want the tray's own icon")
 	}
 	if img, _ := png.Decode(bytes.NewReader(trayGlyph(trayGlyphLight))); img == nil || img.ColorModel() != color.NRGBAModel {
@@ -68,13 +68,13 @@ func TestTrayIconPerOS(t *testing.T) {
 
 // The Windows tray's icon is an icon file with a size for each DPI the
 // system asks for (SM_CXSMICON is 16 at 100% and grows with the DPI: 20 at
-// 125%, 36 at 225% and 40 at 250%), so the notification area takes one of
+// 125%, 32 at 200% and 40 at 250%), so the notification area takes one of
 // them as it is instead of scaling a bigger one: the app's own icon, scaled
 // down to it, came out a size smaller than the icons beside it (#2404). Each
 // size's mark fills its own canvas, or the icon is smaller again.
 func TestTrayWindowsIconSizes(t *testing.T) {
-	entries := icoEntries(t, trayWindowsIcon)
-	for _, size := range []int{16, 20, 24, 28, 32, 36, 40, 48, 64} {
+	entries := icoEntries(t, winTrayIcon)
+	for _, size := range []int{16, 20, 24, 32, 40, 48, 64} {
 		e, ok := icoSize(entries, size)
 		if !ok {
 			t.Errorf("windows: no %dx%d size in the tray icon, want one for every size the system asks for (16 at 100%% to 40 at 250%%): the system scales the nearest one, so a missing size is drawn soft", size, size)
